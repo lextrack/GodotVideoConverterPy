@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: godot-video-converter-py
+Version: 1.0.0
+Summary: Python rewrite core for Godot/Love2D video conversion
+Requires-Python: >=3.11

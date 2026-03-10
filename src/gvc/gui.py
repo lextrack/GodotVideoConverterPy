@@ -1,0 +1,835 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from threading import Event
+
+from PySide6.QtCore import QObject, Qt, QThread, Signal, QUrl
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QDragEnterEvent, QDropEvent, QIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QGroupBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QSplitter,
+    QComboBox,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+    QCheckBox,
+    QProgressBar,
+)
+
+from gvc.atlas import generate_sprite_atlas
+from gvc.convert import ConvertOptions, ENGINE_PROFILES, convert_video, ogv_modes_for_profile
+from gvc.ffmpeg_paths import FFmpegNotFoundError, resolve_ffmpeg_and_ffprobe
+from gvc import __version__
+from gvc.i18n import LANGUAGE_LABELS, language_label_to_code, ui_text
+from gvc.probe import probe_video
+from gvc.recommendations import get_engine_recommendations
+from gvc.settings import AppSettings, load_settings, save_settings
+
+
+def _project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            return Path(meipass)
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+def _app_icon() -> QIcon:
+    root = _project_root()
+    candidates = [root / "Assets" / "icon.ico", root / "Assets" / "icon.png"]
+    for path in candidates:
+        if path.exists():
+            return QIcon(str(path))
+    return QIcon()
+
+
+class Worker(QObject):
+    progress = Signal(int)
+    status = Signal(str)
+    done = Signal(bool)
+
+    def __init__(self, fn, cancel_event: Event):
+        super().__init__()
+        self._fn = fn
+        self._cancel_event = cancel_event
+
+    def run(self):
+        try:
+            self._fn(self._cancel_event, self.progress.emit, self.status.emit)
+            self.done.emit(True)
+        except Exception as exc:
+            self.status.emit(f"Error: {exc}")
+            self.done.emit(False)
+
+
+class MainWindow(QMainWindow):
+    VIDEO_EXTENSIONS = {
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".mkv",
+        ".avi",
+        ".webm",
+        ".ogv",
+        ".ogg",
+        ".wmv",
+        ".flv",
+        ".mpg",
+        ".mpeg",
+        ".3gp",
+        ".gif",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Godot Video Converter")
+        self.setWindowIcon(_app_icon())
+        self.resize(1320, 860)
+        self.setAcceptDrops(True)
+
+        self.ffmpeg, self.ffprobe = resolve_ffmpeg_and_ffprobe()
+        self._thread: QThread | None = None
+        self._worker: Worker | None = None
+        self._cancel_event: Event | None = None
+        self._loading_settings = False
+        self._probe_cache = {}
+
+        root = QWidget()
+        self.setCentralWidget(root)
+        layout = QVBoxLayout(root)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter.setChildrenCollapsible(False)
+        self.content_splitter.setHandleWidth(14)
+        layout.addWidget(self.content_splitter, 1)
+
+        left_panel = QWidget()
+        left = QVBoxLayout(left_panel)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(8)
+        self.content_splitter.addWidget(left_panel)
+
+        files_row = QHBoxLayout()
+        files_row.setSpacing(8)
+        self.files = QListWidget()
+        self.files.setSelectionMode(QListWidget.ExtendedSelection)
+        files_btns = QVBoxLayout()
+        files_btns.setSpacing(8)
+        self.btn_add = QPushButton("Add Files")
+        self.btn_remove = QPushButton("Remove Selected")
+        self.btn_clear = QPushButton("Clear")
+        self.btn_add.setMinimumWidth(140)
+        self.btn_remove.setMinimumWidth(140)
+        self.btn_clear.setMinimumWidth(140)
+        files_btns.addWidget(self.btn_add)
+        files_btns.addWidget(self.btn_remove)
+        files_btns.addWidget(self.btn_clear)
+        files_btns.addStretch()
+        files_row.addWidget(self.files, 1)
+        files_row.addLayout(files_btns)
+        left.addLayout(files_row)
+
+        out_row = QHBoxLayout()
+        out_row.setSpacing(8)
+        self.output = QLineEdit(str(Path.cwd() / "output"))
+        self.btn_output_change = QPushButton("Change Output")
+        self.btn_output_open = QPushButton("Open Output")
+        self.btn_about = QPushButton("About")
+        self.language = QComboBox()
+        self.language.addItems(list(LANGUAGE_LABELS))
+        self.language.setMinimumWidth(120)
+        self.output_label = QLabel("Output:")
+        self.language_label = QLabel("Language:")
+        out_row.addWidget(self.output_label)
+        out_row.addWidget(self.output, 1)
+        out_row.addWidget(self.btn_output_change)
+        out_row.addWidget(self.btn_output_open)
+        out_row.addWidget(self.language_label)
+        out_row.addWidget(self.language)
+        out_row.addWidget(self.btn_about)
+        left.addLayout(out_row)
+
+        self.tabs = QTabWidget()
+        left.addWidget(self.tabs)
+
+        convert_tab = QWidget()
+        convert_layout = QVBoxLayout(convert_tab)
+
+        row1 = QGridLayout()
+        row1.setHorizontalSpacing(10)
+        row1.setVerticalSpacing(10)
+        self.format = QComboBox()
+        self.format.addItems(["ogv", "mp4", "webm", "gif"])
+        self.format.setMinimumWidth(130)
+        self.quality = QComboBox()
+        self.quality.addItems(["ultra", "high", "balanced", "optimized", "tiny"])
+        self.quality.setMinimumWidth(130)
+        self.resolution = QComboBox()
+        self.resolution.setEditable(True)
+        self.resolution.setMinimumWidth(170)
+        self.resolution.addItems(
+            [
+                "Keep original",
+                "256x144",
+                "320x180",
+                "320x240",
+                "426x240",
+                "480x270",
+                "512x288",
+                "640x360",
+                "640x480",
+                "720x404",
+                "720x480",
+                "768x432",
+                "854x480",
+                "960x540",
+                "1024x576",
+                "1024x768",
+                "1152x648",
+                "1280x720",
+                "1280x960",
+                "1366x768",
+                "1600x900",
+                "1920x1080",
+                "2560x1440",
+                "3840x2160",
+            ]
+        )
+        self.resolution.setCurrentText("Keep original")
+        self.fps = QDoubleSpinBox()
+        self.fps.setRange(1.0, 60.0)
+        self.fps.setDecimals(2)
+        self.fps.setSingleStep(1.0)
+        self.fps.setValue(30.0)
+        self.fps.setMinimumWidth(95)
+        self.format_label = QLabel("Format")
+        self.quality_label = QLabel("Quality")
+        self.resolution_label = QLabel("Resolution")
+        self.fps_label = QLabel("FPS")
+        row1.addWidget(self.format_label, 0, 0)
+        row1.addWidget(self.format, 0, 1)
+        row1.addWidget(self.quality_label, 0, 2)
+        row1.addWidget(self.quality, 0, 3)
+        row1.addWidget(self.resolution_label, 0, 4)
+        row1.addWidget(self.resolution, 0, 5)
+        row1.addWidget(self.fps_label, 0, 6)
+        row1.addWidget(self.fps, 0, 7)
+        row1.setColumnStretch(1, 1)
+        row1.setColumnStretch(3, 1)
+        row1.setColumnStretch(5, 1)
+        convert_layout.addLayout(row1)
+
+        row2 = QGridLayout()
+        row2.setHorizontalSpacing(10)
+        row2.setVerticalSpacing(10)
+        self.engine_profile_label = QLabel("Engine Profile")
+        self.engine_profile = QComboBox()
+        self.engine_profile.addItems(list(ENGINE_PROFILES))
+        self.engine_profile.setMinimumWidth(150)
+        self.keep_audio = QCheckBox("Keep audio")
+        self.ogv_mode_label = QLabel("OGV mode")
+        self.ogv_mode = QComboBox()
+        self.ogv_mode.setMinimumWidth(240)
+        self._reload_ogv_mode_options("Godot")
+        row2.addWidget(self.engine_profile_label, 0, 0)
+        row2.addWidget(self.engine_profile, 0, 1)
+        row2.addWidget(self.keep_audio, 0, 2)
+        row2.addWidget(self.ogv_mode_label, 0, 3)
+        row2.addWidget(self.ogv_mode, 0, 4, 1, 3)
+        row2.setColumnStretch(4, 1)
+        convert_layout.addLayout(row2)
+
+        actions_row = QHBoxLayout()
+        self.btn_action = QPushButton("Convert Video")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setEnabled(False)
+        actions_row.addWidget(self.btn_action)
+        actions_row.addWidget(self.btn_cancel)
+        actions_row.addStretch()
+        left.addLayout(actions_row)
+
+        atlas_tab = QWidget()
+        atlas_layout = QVBoxLayout(atlas_tab)
+
+        arow1 = QHBoxLayout()
+        self.atlas_fps = QSpinBox()
+        self.atlas_fps.setRange(1, 30)
+        self.atlas_fps.setValue(5)
+        self.atlas_mode = QComboBox()
+        self.atlas_mode.addItems(["grid", "horizontal", "vertical"])
+        self.atlas_res = QComboBox()
+        self.atlas_res.addItems(["Low", "Medium", "High"])
+        self.atlas_backend = QComboBox()
+        self.atlas_backend.addItems(["ffmpeg", "opencv"])
+        self.frames_label = QLabel("Frames")
+        self.mode_label = QLabel("Mode")
+        self.atlas_resolution_label = QLabel("Resolution")
+        self.backend_label = QLabel("Backend")
+        arow1.addWidget(self.frames_label)
+        arow1.addWidget(self.atlas_fps)
+        arow1.addWidget(self.mode_label)
+        arow1.addWidget(self.atlas_mode)
+        arow1.addWidget(self.atlas_resolution_label)
+        arow1.addWidget(self.atlas_res)
+        arow1.addWidget(self.backend_label)
+        arow1.addWidget(self.atlas_backend)
+        arow1.addStretch()
+        atlas_layout.addLayout(arow1)
+
+        self.tabs.addTab(convert_tab, "Convert Video")
+        self.tabs.addTab(atlas_tab, "Generate Atlas")
+
+        right_panel = QWidget()
+        right = QVBoxLayout(right_panel)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(8)
+        self.content_splitter.addWidget(right_panel)
+        self.content_splitter.setStretchFactor(0, 2)
+        self.content_splitter.setStretchFactor(1, 3)
+        self.content_splitter.setSizes([540, 940])
+
+        self.rec_group = QGroupBox("Godot Recommendations")
+        rec_group_layout = QVBoxLayout(self.rec_group)
+        self.recommend_text = QTextEdit()
+        self.recommend_text.setReadOnly(True)
+        self.recommend_text.setMinimumHeight(540)
+        rec_group_layout.addWidget(self.recommend_text)
+        right.addWidget(self.rec_group, 1)
+
+        self.progress = QProgressBar()
+        self.status = QLabel("Ready")
+        layout.addWidget(self.progress)
+        layout.addWidget(self.status)
+
+        self.btn_add.clicked.connect(self.on_add_files)
+        self.btn_remove.clicked.connect(self.on_remove_selected)
+        self.btn_clear.clicked.connect(self.on_clear)
+        self.btn_output_change.clicked.connect(self.on_output_dir)
+        self.btn_output_open.clicked.connect(self.on_open_output_dir)
+        self.btn_about.clicked.connect(self.on_about)
+        self.btn_action.clicked.connect(self.on_action)
+        self.btn_cancel.clicked.connect(self.on_cancel)
+        self.tabs.currentChanged.connect(self._update_action_button)
+        self.language.currentTextChanged.connect(self.on_language_changed)
+
+        self.files.itemSelectionChanged.connect(self.refresh_selected_info)
+
+        self.output.textChanged.connect(self.save_ui_settings)
+        self.engine_profile.currentTextChanged.connect(self.on_engine_profile_changed)
+        self.format.currentTextChanged.connect(self.save_ui_settings)
+        self.format.currentTextChanged.connect(self._update_ogv_mode_state)
+        self.format.currentTextChanged.connect(self.refresh_selected_info)
+        self.quality.currentTextChanged.connect(self.save_ui_settings)
+        self.resolution.currentTextChanged.connect(self.save_ui_settings)
+        self.fps.valueChanged.connect(self.save_ui_settings)
+        self.keep_audio.toggled.connect(self.save_ui_settings)
+        self.keep_audio.toggled.connect(self.refresh_selected_info)
+        self.ogv_mode.currentTextChanged.connect(self.save_ui_settings)
+        self.atlas_fps.valueChanged.connect(self.save_ui_settings)
+        self.atlas_mode.currentTextChanged.connect(self.save_ui_settings)
+        self.atlas_res.currentTextChanged.connect(self.save_ui_settings)
+        self.atlas_backend.currentTextChanged.connect(self.save_ui_settings)
+
+        self._load_ui_settings()
+        self._apply_language()
+        self._update_action_button()
+        self._update_ogv_mode_state()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        self._add_files(paths)
+        event.acceptProposedAction()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._thread and self._thread.isRunning():
+            choice = QMessageBox.question(
+                self,
+                self._tr("operation_in_progress"),
+                self._tr("operation_in_progress_text"),
+            )
+            if choice != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            self.on_cancel()
+        event.accept()
+
+    def _load_ui_settings(self) -> None:
+        self._loading_settings = True
+        s = load_settings()
+        self._set_combo_value(self.language, s.selected_language, "English")
+        self.output.setText(s.output_folder or str(Path.cwd() / "output"))
+        self._set_combo_value(self.engine_profile, s.selected_engine_profile, "Godot")
+        self._set_combo_value(self.format, s.selected_format, "ogv")
+        self._set_combo_value(self.quality, s.selected_quality, "optimized")
+        self._set_editable_combo_value(self.resolution, s.selected_resolution, "Keep original")
+        self.fps.setValue(self._coerce_video_fps(s.fps))
+        self.keep_audio.setChecked(s.keep_audio)
+        self._reload_ogv_mode_options(self.engine_profile.currentText(), s.selected_ogv_mode)
+        self.atlas_fps.setValue(max(1, min(30, s.atlas_fps or 5)))
+        self._set_combo_value(self.atlas_mode, s.selected_atlas_mode, "grid")
+        self._set_combo_value(self.atlas_res, s.selected_atlas_resolution, "Medium")
+        self._set_combo_value(self.atlas_backend, s.selected_atlas_backend, "ffmpeg")
+        self._loading_settings = False
+
+    def _set_combo_value(self, combo: QComboBox, value: str, fallback: str) -> None:
+        idx = combo.findText(value)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+            return
+        fallback_idx = combo.findText(fallback)
+        if fallback_idx >= 0:
+            combo.setCurrentIndex(fallback_idx)
+
+    def _set_editable_combo_value(self, combo: QComboBox, value: str, fallback: str) -> None:
+        chosen = (value or "").strip() or fallback
+        idx = combo.findText(chosen)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+            return
+        combo.setCurrentText(chosen)
+
+    def save_ui_settings(self) -> None:
+        if self._loading_settings:
+            return
+        s = AppSettings(
+            selected_language=self.language.currentText(),
+            output_folder=self.output.text().strip() or "output",
+            selected_engine_profile=self.engine_profile.currentText(),
+            selected_format=self.format.currentText(),
+            selected_resolution=self.resolution.currentText().strip() or "Keep original",
+            selected_quality=self.quality.currentText(),
+            selected_ogv_mode=self.ogv_mode.currentText(),
+            keep_audio=self.keep_audio.isChecked(),
+            fps=f"{self.fps.value():g}",
+            atlas_fps=self.atlas_fps.value(),
+            selected_atlas_mode=self.atlas_mode.currentText(),
+            selected_atlas_resolution=self.atlas_res.currentText(),
+            selected_atlas_backend=self.atlas_backend.currentText(),
+        )
+        save_settings(s)
+
+    def _tr(self, key: str, **kwargs) -> str:
+        lang = self.language.currentText() if hasattr(self, "language") else LANGUAGE_LABELS[0]
+        return ui_text(lang, key, **kwargs)
+
+    def _lang_code(self) -> str:
+        return language_label_to_code(self.language.currentText())
+
+    def _all_translations(self, key: str) -> set[str]:
+        return {ui_text(label, key) for label in LANGUAGE_LABELS}
+
+    def _apply_language(self) -> None:
+        self.setWindowTitle(self._tr("window_title"))
+        self.btn_add.setText(self._tr("add_files"))
+        self.btn_remove.setText(self._tr("remove_selected"))
+        self.btn_clear.setText(self._tr("clear"))
+        self.output_label.setText(self._tr("output"))
+        self.btn_output_change.setText(self._tr("change_output"))
+        self.btn_output_open.setText(self._tr("open_output"))
+        self.language_label.setText(self._tr("language"))
+        self.btn_about.setText(self._tr("about"))
+        self.engine_profile_label.setText(self._tr("engine_profile"))
+        self.format_label.setText(self._tr("format"))
+        self.quality_label.setText(self._tr("quality"))
+        self.resolution_label.setText(self._tr("resolution"))
+        self.resolution.setItemText(0, self._tr("keep_original"))
+        if self.resolution.currentText() in self._all_translations("keep_original"):
+            self.resolution.setCurrentText(self._tr("keep_original"))
+        self.fps_label.setText(self._tr("fps"))
+        self.keep_audio.setText(self._tr("keep_audio"))
+        self.ogv_mode_label.setText(self._tr("ogv_mode"))
+        self.frames_label.setText(self._tr("frames"))
+        self.mode_label.setText(self._tr("mode"))
+        self.atlas_resolution_label.setText(self._tr("resolution"))
+        self.backend_label.setText(self._tr("backend"))
+        self.rec_group.setTitle(self._tr("rec_title"))
+        self.btn_cancel.setText(self._tr("cancel"))
+        self.tabs.setTabText(0, self._tr("tab_convert"))
+        self.tabs.setTabText(1, self._tr("tab_atlas"))
+        self._update_action_button()
+        if self.status.text() in self._all_translations("ready"):
+            self.status.setText(self._tr("ready"))
+
+    def on_language_changed(self):
+        self._apply_language()
+        self.refresh_selected_info()
+        self.save_ui_settings()
+
+    def on_engine_profile_changed(self):
+        self._reload_ogv_mode_options(self.engine_profile.currentText())
+        self.refresh_selected_info()
+        self.save_ui_settings()
+
+    def _coerce_video_fps(self, value: str | float | int | None) -> float:
+        try:
+            fps = float(value) if value is not None else 30.0
+        except (TypeError, ValueError):
+            fps = 30.0
+        return max(1.0, min(60.0, fps))
+
+    def _selected_inputs(self) -> list[str]:
+        selected = [x.text() for x in self.files.selectedItems()]
+        if selected:
+            return selected
+        return [self.files.item(i).text() for i in range(self.files.count())]
+
+    def _is_probable_video_file(self, path: Path) -> bool:
+        return path.suffix.lower() in self.VIDEO_EXTENSIONS
+
+    def _cached_probe(self, src: str):
+        cached = self._probe_cache.get(src)
+        if cached is not None:
+            return cached
+        info = probe_video(str(self.ffprobe), src)
+        self._probe_cache[src] = info
+        return info
+
+    def _set_busy(self, busy: bool):
+        self.btn_action.setEnabled(not busy)
+        self.files.setEnabled(not busy)
+        self.btn_add.setEnabled(not busy)
+        self.btn_remove.setEnabled(not busy)
+        self.btn_clear.setEnabled(not busy)
+        self.output.setEnabled(not busy)
+        self.btn_output_change.setEnabled(not busy)
+        self.btn_output_open.setEnabled(True)
+        self.btn_about.setEnabled(not busy)
+        self.language.setEnabled(not busy)
+        self.tabs.setEnabled(not busy)
+        self.format.setEnabled(not busy)
+        self.quality.setEnabled(not busy)
+        self.resolution.setEnabled(not busy)
+        self.fps.setEnabled(not busy)
+        self.engine_profile.setEnabled(not busy)
+        self.keep_audio.setEnabled(not busy)
+        self.ogv_mode.setEnabled(not busy and self.format.currentText().strip().lower() == "ogv")
+        self.atlas_fps.setEnabled(not busy)
+        self.atlas_mode.setEnabled(not busy)
+        self.atlas_res.setEnabled(not busy)
+        self.atlas_backend.setEnabled(not busy)
+        self.btn_cancel.setEnabled(busy)
+
+    def _update_action_button(self) -> None:
+        if self.tabs.currentIndex() == 0:
+            self.btn_action.setText(self._tr("action_convert"))
+        else:
+            self.btn_action.setText(self._tr("action_atlas"))
+
+    def _update_ogv_mode_state(self) -> None:
+        is_ogv = self.format.currentText().strip().lower() == "ogv"
+        self.ogv_mode_label.setEnabled(is_ogv)
+        self.ogv_mode.setEnabled(is_ogv)
+
+    def _reload_ogv_mode_options(self, engine_profile: str, selected: str | None = None) -> None:
+        current = selected if selected is not None else self.ogv_mode.currentText()
+        options = list(ogv_modes_for_profile(engine_profile))
+        self.ogv_mode.blockSignals(True)
+        self.ogv_mode.clear()
+        self.ogv_mode.addItems(options)
+        if current in options:
+            self.ogv_mode.setCurrentText(current)
+        else:
+            self.ogv_mode.setCurrentIndex(0)
+        self.ogv_mode.blockSignals(False)
+
+    def on_action(self):
+        if self.tabs.currentIndex() == 0:
+            self.on_convert()
+        else:
+            self.on_atlas()
+
+    def _start_worker(self, fn):
+        self._thread = QThread(self)
+        self._cancel_event = Event()
+        self._worker = Worker(fn, self._cancel_event)
+        self._worker.moveToThread(self._thread)
+
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self.progress.setValue)
+        self._worker.status.connect(self.status.setText)
+
+        def _done(ok: bool):
+            self._set_busy(False)
+            if ok and not (self._cancel_event and self._cancel_event.is_set()):
+                self.status.setText(self._tr("done"))
+            elif self._cancel_event and self._cancel_event.is_set():
+                self.status.setText(self._tr("cancelled"))
+            if self._thread:
+                self._thread.quit()
+                self._thread.wait()
+            self._thread = None
+            self._worker = None
+            self._cancel_event = None
+
+        self._worker.done.connect(_done)
+
+        self._set_busy(True)
+        self.progress.setValue(0)
+        self._thread.start()
+
+    def _add_files(self, files: list[str]) -> None:
+        existing = {self.files.item(i).text() for i in range(self.files.count())}
+        added = 0
+        rejected = 0
+        for f in files:
+            if not f or f in existing:
+                continue
+            p = Path(f)
+            if not p.exists() or not p.is_file():
+                continue
+            if not self._is_probable_video_file(p):
+                rejected += 1
+                continue
+            self.files.addItem(f)
+            existing.add(f)
+            added += 1
+
+        if added == 0 and rejected > 0:
+            self.status.setText(self._tr("no_valid_files_added"))
+        elif added > 0 and rejected > 0:
+            self.status.setText(self._tr("added_rejected", added=added, rejected=rejected))
+        elif added > 0:
+            self.status.setText(self._tr("added_n_files", added=added))
+
+        if self.files.count() > 0 and not self.files.selectedItems():
+            self.files.setCurrentRow(0)
+            self.refresh_selected_info()
+
+    def refresh_selected_info(self) -> None:
+        items = self.files.selectedItems()
+        if not items:
+            self.recommend_text.setPlainText("")
+            return
+
+        src = items[0].text()
+        try:
+            info = self._cached_probe(src)
+            if not info.is_valid:
+                self.recommend_text.setPlainText(self._tr("invalid_video_file", name=Path(src).name))
+                return
+            self.recommend_text.setPlainText(
+                get_engine_recommendations(
+                    info,
+                    engine_profile=self.engine_profile.currentText(),
+                    keep_audio=self.keep_audio.isChecked(),
+                    target_format=self.format.currentText(),
+                    language=self._lang_code(),
+                )
+            )
+        except Exception:
+            self.recommend_text.setPlainText(self._tr("invalid_video_file", name=Path(src).name))
+
+    def on_add_files(self):
+        files, _ = QFileDialog.getOpenFileNames(self, self._tr("select_videos"))
+        self._add_files(files)
+
+    def on_remove_selected(self):
+        for item in self.files.selectedItems():
+            self._probe_cache.pop(item.text(), None)
+            self.files.takeItem(self.files.row(item))
+        self.refresh_selected_info()
+
+    def on_clear(self):
+        self.files.clear()
+        self._probe_cache.clear()
+        self.refresh_selected_info()
+        self.status.setText(self._tr("list_cleared"))
+
+    def on_output_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, self._tr("select_output_folder"), self.output.text())
+        if folder:
+            self.output.setText(folder)
+
+    def on_open_output_dir(self):
+        output = Path(self.output.text().strip() or "output")
+        output.mkdir(parents=True, exist_ok=True)
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(output.resolve())))
+        if not opened:
+            QMessageBox.warning(self, self._tr("open_output_folder"), self._tr("open_output_folder_error"))
+
+    def on_about(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self._tr("about"))
+        dialog.resize(520, 260)
+
+        layout = QVBoxLayout(dialog)
+        title = QLabel(self._tr("window_title"))
+        body = QLabel(self._tr("about_text", version=__version__))
+        body.setWordWrap(True)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok, parent=dialog)
+        buttons.accepted.connect(dialog.accept)
+
+        layout.addWidget(title)
+        layout.addWidget(body, 1)
+        layout.addWidget(buttons)
+
+        dialog.exec()
+
+    def on_cancel(self):
+        if self._cancel_event:
+            self._cancel_event.set()
+            self.status.setText(self._tr("cancelling"))
+
+    def on_convert(self):
+        inputs = self._selected_inputs()
+        if not inputs:
+            QMessageBox.warning(self, self._tr("no_files_title"), self._tr("no_files_text"))
+            return
+
+        try:
+            fps_val = float(self.fps.value())
+        except ValueError as exc:
+            QMessageBox.warning(self, self._tr("invalid_fps_title"), str(exc))
+            return
+
+        output = Path(self.output.text())
+        output.mkdir(parents=True, exist_ok=True)
+
+        convert_cfg = {
+            "engine_profile": self.engine_profile.currentText(),
+            "format": self.format.currentText(),
+            "quality": self.quality.currentText(),
+            "resolution": self.resolution.currentText(),
+            "fps": fps_val,
+            "keep_audio": self.keep_audio.isChecked(),
+            "ogv_mode": self.ogv_mode.currentText(),
+        }
+
+        def _run(cancel_event: Event, progress_cb, status_cb):
+            total = len(inputs)
+            for idx, src in enumerate(inputs, start=1):
+                if cancel_event.is_set():
+                    raise RuntimeError("conversion cancelled by user")
+
+                stem = Path(src).stem
+                ext = {"ogv": ".ogv", "mp4": ".mp4", "webm": ".webm", "gif": ".gif"}[convert_cfg["format"]]
+                dst = output / f"{stem}_converted{ext}"
+                counter = 1
+                while dst.exists():
+                    dst = output / f"{stem}_converted_{counter}{ext}"
+                    counter += 1
+
+                status_cb(self._tr("converting_status", index=idx, total=total, name=Path(src).name))
+
+                def _per_file(p: int):
+                    percent = int(((idx - 1) * 100 + p) / total)
+                    progress_cb(percent)
+
+                convert_video(
+                    str(self.ffmpeg),
+                    str(self.ffprobe),
+                    src,
+                    ConvertOptions(
+                        output_file=str(dst),
+                        engine_profile=convert_cfg["engine_profile"],
+                        fmt=convert_cfg["format"],
+                        quality=convert_cfg["quality"],
+                        keep_audio=convert_cfg["keep_audio"],
+                        fps=convert_cfg["fps"],
+                        resolution=convert_cfg["resolution"],
+                        ogv_mode=convert_cfg["ogv_mode"],
+                    ),
+                    on_progress=_per_file,
+                    cancel_event=cancel_event,
+                )
+
+            progress_cb(100)
+
+        self._start_worker(_run)
+
+    def on_atlas(self):
+        inputs = self._selected_inputs()
+        if not inputs:
+            QMessageBox.warning(self, self._tr("no_files_title"), self._tr("no_files_text"))
+            return
+
+        output = Path(self.output.text())
+        output.mkdir(parents=True, exist_ok=True)
+
+        atlas_cfg = {
+            "fps": self.atlas_fps.value(),
+            "mode": self.atlas_mode.currentText(),
+            "resolution": self.atlas_res.currentText(),
+            "backend": self.atlas_backend.currentText(),
+        }
+
+        def _run(cancel_event: Event, progress_cb, status_cb):
+            total = len(inputs)
+            for idx, src in enumerate(inputs, start=1):
+                if cancel_event.is_set():
+                    raise RuntimeError("atlas generation cancelled by user")
+
+                stem = Path(src).stem
+                dst = output / f"{stem}_atlas.png"
+                counter = 1
+                while dst.exists():
+                    dst = output / f"{stem}_atlas_{counter}.png"
+                    counter += 1
+
+                status_cb(self._tr("atlas_status", index=idx, total=total, name=Path(src).name))
+
+                def _per_file(p: int):
+                    percent = int(((idx - 1) * 100 + p) / total)
+                    progress_cb(percent)
+
+                result = generate_sprite_atlas(
+                    str(self.ffmpeg),
+                    str(self.ffprobe),
+                    src,
+                    str(dst),
+                    fps=atlas_cfg["fps"],
+                    mode=atlas_cfg["mode"],
+                    atlas_resolution=atlas_cfg["resolution"],
+                    backend=atlas_cfg["backend"],
+                    cancel_event=cancel_event,
+                    on_progress=_per_file,
+                )
+
+            progress_cb(100)
+
+        self._start_worker(_run)
+
+
+def main() -> None:
+    app = QApplication(sys.argv)
+    app.setWindowIcon(_app_icon())
+    try:
+        win = MainWindow()
+    except FFmpegNotFoundError as exc:
+        lang = load_settings().selected_language
+        title = ui_text(lang, "ffmpeg_not_found")
+        QMessageBox.critical(None, title, str(exc))
+        raise SystemExit(2)
+
+    win.show()
+    raise SystemExit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

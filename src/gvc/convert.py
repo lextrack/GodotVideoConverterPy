@@ -1,0 +1,323 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from gvc.probe import probe_video
+from gvc.runner import run_ffmpeg
+
+ENGINE_PROFILE_GODOT = "Godot"
+ENGINE_PROFILE_LOVE2D = "Love2D"
+ENGINE_PROFILES = (ENGINE_PROFILE_GODOT, ENGINE_PROFILE_LOVE2D)
+
+GODOT_OGV_MODES = (
+    "Official Godot",
+    "Seek Friendly",
+    "Ideal Loop",
+    "Mobile Optimized",
+    "High Compression",
+)
+
+LOVE2D_OGV_MODES = (
+    "Love2D Compatibility",
+    "Seek Friendly",
+    "Ideal Loop",
+    "Lightweight",
+)
+
+OGV_QUALITY_PROFILES = {
+    # Keep quality VBR-driven and let engine presets control playback strategy.
+    # Balanced maps to Godot's published q:v/q:a 6 baseline.
+    "ultra": ("8", "6"),
+    "high": ("7", "6"),
+    "balanced": ("6", "6"),
+    "optimized": ("5", "5"),
+    "tiny": ("4", "4"),
+}
+
+
+@dataclass(slots=True)
+class ConvertOptions:
+    output_file: str
+    fmt: str = "ogv"
+    quality: str = "optimized"
+    keep_audio: bool = False
+    fps: float | None = None
+    resolution: str | None = None
+    engine_profile: str = ENGINE_PROFILE_GODOT
+    ogv_mode: str = "standard"
+
+
+def _quality_key(q: str) -> str:
+    return q.strip().lower()
+
+
+def _gif_quality_profile(quality: str) -> tuple[int, str]:
+    q = _quality_key(quality)
+    profiles = {
+        "ultra": (256, "sierra2_4a"),
+        "high": (192, "sierra2_4a"),
+        "balanced": (128, "floyd_steinberg"),
+        "optimized": (96, "bayer"),
+        "tiny": (64, "bayer"),
+    }
+    return profiles.get(q, profiles["balanced"])
+
+
+def normalize_engine_profile(profile: str | None) -> str:
+    p = (profile or "").strip().lower()
+    if p in {"love2d", "love", "löve", "love 2d"}:
+        return ENGINE_PROFILE_LOVE2D
+    return ENGINE_PROFILE_GODOT
+
+
+def ogv_modes_for_profile(profile: str | None) -> tuple[str, ...]:
+    if normalize_engine_profile(profile) == ENGINE_PROFILE_LOVE2D:
+        return LOVE2D_OGV_MODES
+    return GODOT_OGV_MODES
+
+
+def _ogv_quality_args(quality: str) -> tuple[list[str], list[str]]:
+    q = _quality_key(quality)
+    video_q, audio_q = OGV_QUALITY_PROFILES.get(q, OGV_QUALITY_PROFILES["balanced"])
+    video = ["-c:v", "libtheora", "-q:v", video_q, "-threads", "0"]
+    audio = ["-c:a", "libvorbis", "-q:a", audio_q, "-ar", "44100", "-ac", "2"]
+    return video, audio
+
+
+def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str) -> tuple[list[str], list[str], list[str]]:
+    q = _quality_key(quality)
+
+    if fmt == "mp4":
+        map_q = {
+            "ultra": ["-c:v", "libx264", "-crf", "15", "-preset", "slower", "-profile:v", "high", "-level", "4.1"],
+            "high": ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high", "-level", "4.1"],
+            "balanced": ["-c:v", "libx264", "-crf", "23", "-preset", "medium", "-profile:v", "main", "-level", "4.0"],
+            "optimized": ["-c:v", "libx264", "-crf", "28", "-preset", "fast", "-profile:v", "main", "-level", "3.1"],
+            "tiny": ["-c:v", "libx264", "-crf", "40", "-preset", "fast", "-profile:v", "baseline", "-level", "3.0"],
+        }
+        return map_q.get(q, map_q["balanced"]), ["-acodec", "aac", "-b:a", "128k"], ["-movflags", "+faststart"]
+
+    if fmt == "webm":
+        map_q = {
+            "ultra": ["-c:v", "libvpx-vp9", "-crf", "10", "-b:v", "0", "-cpu-used", "0", "-row-mt", "1", "-tile-columns", "2"],
+            "high": ["-c:v", "libvpx-vp9", "-crf", "15", "-b:v", "0", "-cpu-used", "1", "-row-mt", "1", "-tile-columns", "1"],
+            "balanced": ["-c:v", "libvpx-vp9", "-crf", "25", "-b:v", "0", "-cpu-used", "2", "-row-mt", "1"],
+            "optimized": ["-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-cpu-used", "4", "-row-mt", "1"],
+            "tiny": ["-c:v", "libvpx-vp9", "-crf", "48", "-b:v", "0", "-cpu-used", "5", "-deadline", "realtime"],
+        }
+        return map_q.get(q, map_q["balanced"]), ["-acodec", "libopus", "-b:a", "96k"], []
+
+    if fmt == "gif":
+        return [], [], ["-loop", "0"]
+
+    # OGV defaults remain quality-driven, while engine profiles provide
+    # engine-specific presets for seek behavior, looping, and compatibility.
+
+    godot_modes = {
+        "official godot": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "64",
+            "-keyint_min",
+            "32",
+        ],
+        "seek friendly": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "32",
+            "-keyint_min",
+            "16",
+            "-fps_mode",
+            "cfr",
+        ],
+        "ideal loop": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "1",
+            "-keyint_min",
+            "1",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-fflags",
+            "+genpts",
+        ],
+        "mobile optimized": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "48",
+            "-keyint_min",
+            "24",
+            "-fps_mode",
+            "cfr",
+        ],
+        "high compression": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "256",
+            "-keyint_min",
+            "64",
+        ],
+        # Backward compatibility with previous saved settings.
+        "standard": ["-pix_fmt", "yuv420p", "-g", "30", "-keyint_min", "30"],
+        "constant fps (cfr)": ["-pix_fmt", "yuv420p", "-g", "15", "-keyint_min", "15", "-fps_mode", "cfr"],
+        "optimized for weak hardware": ["-pix_fmt", "yuv420p", "-g", "60", "-keyint_min", "30", "-threads", "4"],
+        "controlled bitrate": ["-pix_fmt", "yuv420p", "-g", "15", "-keyint_min", "5", "-b:v", "1200k", "-maxrate", "1500k", "-bufsize", "2000k"],
+    }
+    love2d_modes = {
+        "love2d compatibility": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "16",
+            "-keyint_min",
+            "8",
+            "-fps_mode",
+            "cfr",
+        ],
+        "seek friendly": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "8",
+            "-keyint_min",
+            "4",
+            "-fps_mode",
+            "cfr",
+        ],
+        "ideal loop": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "1",
+            "-keyint_min",
+            "1",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-fflags",
+            "+genpts",
+        ],
+        "lightweight": [
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "48",
+            "-keyint_min",
+            "24",
+        ],
+        # Backward compatibility if an older config is reused under Love2D.
+        "standard": ["-pix_fmt", "yuv420p", "-g", "24", "-keyint_min", "12"],
+    }
+
+    profile = normalize_engine_profile(engine_profile)
+    mode_key = ogv_mode.strip().lower()
+    video, audio = _ogv_quality_args(quality)
+    if profile == ENGINE_PROFILE_LOVE2D:
+        return video, audio, love2d_modes.get(mode_key, love2d_modes["love2d compatibility"])
+    return video, audio, godot_modes.get(mode_key, godot_modes["official godot"])
+
+
+def _parse_resolution(value: str | None) -> tuple[int, int] | None:
+    if not value:
+        return None
+    s = value.strip().lower()
+    if s in {"keep original", "keep_original", "original", "mantener original"}:
+        return None
+    parts = s.split("x")
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def _build_filter_chain(fmt: str, fps: float | None, resolution: str | None, quality: str) -> str | None:
+    filters: list[str] = []
+
+    parsed = _parse_resolution(resolution)
+    if parsed:
+        w, h = parsed
+        if fmt == "mp4":
+            filters.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
+            filters.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+        else:
+            filters.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
+
+    if fps and fps > 0:
+        filters.append(f"fps={fps}")
+
+    if fmt == "gif":
+        if not fps:
+            fps = 20
+        max_colors, dither = _gif_quality_profile(quality)
+        gif_chain = [f"fps={fps}"]
+        if parsed:
+            w, h = parsed
+            gif_chain.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
+        gif_chain.append("scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos")
+        gif_chain.append("split[s0][s1]")
+        gif_chain.append(f"[s0]palettegen=max_colors={max_colors}:stats_mode=diff[p]")
+        if dither == "bayer":
+            gif_chain.append("[s1][p]paletteuse=dither=bayer:bayer_scale=5")
+        else:
+            gif_chain.append(f"[s1][p]paletteuse=dither={dither}")
+        return ",".join(gif_chain)
+
+    return ",".join(filters) if filters else None
+
+
+def _validate_video_fps(fps: float | None) -> None:
+    if fps is None:
+        return
+    if fps < 1 or fps > 60:
+        raise ValueError("video fps must be between 1 and 60")
+
+
+def convert_video(
+    ffmpeg_path: str,
+    ffprobe_path: str,
+    input_file: str,
+    options: ConvertOptions,
+    on_progress=None,
+    cancel_event=None,
+) -> str:
+    src = Path(input_file)
+    if not src.exists() or not src.is_file():
+        raise FileNotFoundError(f"Input file not found: {src.name}")
+    _validate_video_fps(options.fps)
+
+    out = Path(options.output_file)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    info = probe_video(ffprobe_path, input_file)
+    total_seconds = info.duration if info.duration > 0 else None
+
+    codec_video, codec_audio, extra = _video_codec_args(options.fmt, options.quality, options.ogv_mode, options.engine_profile)
+    if not options.keep_audio or options.fmt == "gif":
+        codec_audio = ["-an"]
+
+    filter_chain = _build_filter_chain(options.fmt, options.fps, options.resolution, options.quality)
+
+    args = ["-y", "-i", input_file]
+    if filter_chain:
+        args.extend(["-vf", filter_chain])
+
+    args.extend(codec_video)
+    args.extend(codec_audio)
+    args.extend(extra)
+    args.append(str(out))
+
+    run_ffmpeg(
+        ffmpeg_path,
+        args,
+        total_seconds=total_seconds,
+        on_progress=on_progress,
+        cancel_event=cancel_event,
+    )
+    return str(out)

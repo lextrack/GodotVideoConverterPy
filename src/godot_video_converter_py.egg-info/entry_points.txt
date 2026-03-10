@@ -1,0 +1,2 @@
+[console_scripts]
+gvc-gui = gvc.gui:main
