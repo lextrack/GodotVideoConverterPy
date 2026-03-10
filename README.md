@@ -4,7 +4,7 @@ Desktop utility for converting videos into game-ready formats, with a strong foc
 
 This project is a Python rewrite of the original [.NET tool](https://github.com/lextrack/GodotVideoConverter).
 
-## What This App Does Well
+## What does this app mainly do?
 
 - Convert videos to `ogv`, `mp4`, `webm`, and `gif`
 - Switch between `Godot` and `Love2D` engine profiles for OGV-specific presets
