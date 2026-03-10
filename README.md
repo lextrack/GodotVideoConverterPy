@@ -18,8 +18,6 @@ This project is a Python rewrite of the original [.NET tool](https://github.com/
 
 The app is still centered on Godot, but it now includes a dedicated Love2D OGV profile and engine-specific guidance. Love2D has its own OGV preset family and playback recommendations, while the rest of the output formats remain shared between engine profiles.
 
-`A Godot-focused video conversion tool with dedicated OGV workflows for both Godot and Love2D.`
-
 ## Main Workflows
 
 ### 1. Convert Video for Godot
