@@ -1,4 +1,4 @@
-# Godot Video Converter (Python)
+# Godot Video Converter
 
 Desktop utility for converting videos into game-ready formats, with a strong focus on OGV workflows for Godot and atlas generation for 2D pipelines.
 
