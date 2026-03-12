@@ -5,7 +5,15 @@ from pathlib import Path
 from threading import Event
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, QUrl
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QDragEnterEvent, QDropEvent, QIcon
+from PySide6.QtGui import (
+    QColor,
+    QCloseEvent,
+    QDesktopServices,
+    QDragEnterEvent,
+    QDropEvent,
+    QIcon,
+    QPalette,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -58,6 +66,31 @@ def _app_icon() -> QIcon:
         if path.exists():
             return QIcon(str(path))
     return QIcon()
+
+
+def _dark_palette() -> QPalette:
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(32, 34, 39))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(236, 239, 244))
+    palette.setColor(QPalette.ColorRole.Base, QColor(24, 26, 30))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(39, 43, 51))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(24, 26, 30))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(236, 239, 244))
+    palette.setColor(QPalette.ColorRole.Text, QColor(236, 239, 244))
+    palette.setColor(QPalette.ColorRole.Button, QColor(47, 52, 62))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(236, 239, 244))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 107, 107))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(88, 166, 255))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(17, 21, 28))
+    palette.setColor(QPalette.ColorRole.Link, QColor(88, 166, 255))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(128, 134, 145))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(128, 134, 145))
+    return palette
+
+
+def _apply_default_theme(app: QApplication) -> None:
+    app.setStyle("Fusion")
+    app.setPalette(_dark_palette())
 
 
 class Worker(QObject):
@@ -819,6 +852,7 @@ class MainWindow(QMainWindow):
 def main() -> None:
     app = QApplication(sys.argv)
     app.setWindowIcon(_app_icon())
+    _apply_default_theme(app)
     try:
         win = MainWindow()
     except FFmpegNotFoundError as exc:
