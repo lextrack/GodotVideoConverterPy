@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import sys
 from pathlib import Path
 from threading import Event
@@ -46,7 +47,6 @@ from gvc.ffmpeg_paths import FFmpegNotFoundError, resolve_ffmpeg_and_ffprobe
 from gvc import __version__
 from gvc.i18n import LANGUAGE_LABELS, language_label_to_code, ui_text
 from gvc.probe import probe_video
-from gvc.recommendations import get_engine_recommendations
 from gvc.settings import AppSettings, load_settings, save_settings
 
 
@@ -91,6 +91,12 @@ def _dark_palette() -> QPalette:
 def _apply_default_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
+
+
+def _html_list(items: list[str]) -> str:
+    if not items:
+        return ""
+    return "<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in items) + "</ul>"
 
 
 class Worker(QObject):
@@ -271,6 +277,11 @@ class MainWindow(QMainWindow):
         row1.setColumnStretch(5, 1)
         convert_layout.addLayout(row1)
 
+        self.format_hint = QLabel()
+        self.format_hint.setWordWrap(True)
+        self.format_hint.setTextFormat(Qt.TextFormat.RichText)
+        convert_layout.addWidget(self.format_hint)
+
         row2 = QGridLayout()
         row2.setHorizontalSpacing(10)
         row2.setVerticalSpacing(10)
@@ -290,6 +301,17 @@ class MainWindow(QMainWindow):
         row2.addWidget(self.ogv_mode, 0, 4, 1, 3)
         row2.setColumnStretch(4, 1)
         convert_layout.addLayout(row2)
+
+        self.preset_group = QGroupBox()
+        preset_layout = QVBoxLayout(self.preset_group)
+        self.preset_title = QLabel()
+        self.preset_title.setWordWrap(True)
+        self.preset_body = QLabel()
+        self.preset_body.setWordWrap(True)
+        self.preset_body.setTextFormat(Qt.TextFormat.RichText)
+        preset_layout.addWidget(self.preset_title)
+        preset_layout.addWidget(self.preset_body)
+        convert_layout.addWidget(self.preset_group)
 
         actions_row = QHBoxLayout()
         self.btn_action = QPushButton("Convert Video")
@@ -342,10 +364,16 @@ class MainWindow(QMainWindow):
 
         self.rec_group = QGroupBox("Godot Recommendations")
         rec_group_layout = QVBoxLayout(self.rec_group)
-        self.recommend_text = QTextEdit()
-        self.recommend_text.setReadOnly(True)
-        self.recommend_text.setMinimumHeight(540)
-        rec_group_layout.addWidget(self.recommend_text)
+        self.summary_text = QTextEdit()
+        self.summary_text.setReadOnly(True)
+        self.summary_text.setMinimumHeight(240)
+        self.summary_text.setAcceptRichText(True)
+        self.guidance_text = QTextEdit()
+        self.guidance_text.setReadOnly(True)
+        self.guidance_text.setMinimumHeight(370)
+        self.guidance_text.setAcceptRichText(True)
+        rec_group_layout.addWidget(self.summary_text)
+        rec_group_layout.addWidget(self.guidance_text, 1)
         right.addWidget(self.rec_group, 1)
 
         self.progress = QProgressBar()
@@ -367,16 +395,21 @@ class MainWindow(QMainWindow):
         self.files.itemSelectionChanged.connect(self.refresh_selected_info)
 
         self.output.textChanged.connect(self.save_ui_settings)
+        self.output.textChanged.connect(self._refresh_experience_panels)
         self.engine_profile.currentTextChanged.connect(self.on_engine_profile_changed)
         self.format.currentTextChanged.connect(self.save_ui_settings)
         self.format.currentTextChanged.connect(self._update_ogv_mode_state)
         self.format.currentTextChanged.connect(self.refresh_selected_info)
         self.quality.currentTextChanged.connect(self.save_ui_settings)
+        self.quality.currentTextChanged.connect(self._refresh_experience_panels)
         self.resolution.currentTextChanged.connect(self.save_ui_settings)
+        self.resolution.currentTextChanged.connect(self._refresh_experience_panels)
         self.fps.valueChanged.connect(self.save_ui_settings)
+        self.fps.valueChanged.connect(self._refresh_experience_panels)
         self.keep_audio.toggled.connect(self.save_ui_settings)
         self.keep_audio.toggled.connect(self.refresh_selected_info)
         self.ogv_mode.currentTextChanged.connect(self.save_ui_settings)
+        self.ogv_mode.currentTextChanged.connect(self._refresh_experience_panels)
         self.atlas_fps.valueChanged.connect(self.save_ui_settings)
         self.atlas_mode.currentTextChanged.connect(self.save_ui_settings)
         self.atlas_res.currentTextChanged.connect(self.save_ui_settings)
@@ -476,6 +509,247 @@ class MainWindow(QMainWindow):
     def _all_translations(self, key: str) -> set[str]:
         return {ui_text(label, key) for label in LANGUAGE_LABELS}
 
+    def _selected_primary_path(self) -> str | None:
+        items = self.files.selectedItems()
+        if items:
+            return items[0].text()
+        if self.files.count() > 0:
+            return self.files.item(0).text()
+        return None
+
+    def _selected_video_info(self):
+        src = self._selected_primary_path()
+        if not src:
+            return None
+        try:
+            return self._cached_probe(src)
+        except Exception:
+            return None
+
+    def _engine_key(self) -> str:
+        return "love2d" if self.engine_profile.currentText().strip().lower() == "love2d" else "godot"
+
+    def _format_key(self) -> str:
+        return self.format.currentText().strip().lower()
+
+    def _current_preset_summary(self) -> tuple[str, str]:
+        engine = self._engine_key()
+        fmt = self._format_key()
+        if fmt != "ogv":
+            return (
+                self._tr(f"format_{fmt}_title"),
+                self._tr(f"format_{fmt}_body"),
+            )
+
+        mode = self.ogv_mode.currentText().strip().lower()
+        preset_map = {
+            "official godot": ("preset_official_godot_title", "preset_official_godot_body"),
+            "seek friendly": ("preset_seek_friendly_title", "preset_seek_friendly_body"),
+            "ideal loop": ("preset_ideal_loop_title", "preset_ideal_loop_body"),
+            "mobile optimized": ("preset_mobile_optimized_title", "preset_mobile_optimized_body"),
+            "high compression": ("preset_high_compression_title", "preset_high_compression_body"),
+            "love2d compatibility": ("preset_love2d_compatibility_title", "preset_love2d_compatibility_body"),
+            "lightweight": ("preset_lightweight_title", "preset_lightweight_body"),
+        }
+        title_key, body_key = preset_map.get(
+            mode,
+            (
+                f"preset_{engine}_default_title",
+                f"preset_{engine}_default_body",
+            ),
+        )
+        return self._tr(title_key), self._tr(body_key)
+
+    def _estimate_levels(self, info) -> tuple[str, str, str]:
+        fmt = self._format_key()
+        quality = self.quality.currentText().strip().lower()
+        fps = float(self.fps.value())
+        resolution = self.resolution.currentText().strip().lower()
+        duration = info.duration if info and getattr(info, "is_valid", False) else 0.0
+
+        score = 0
+        if fmt == "ogv":
+            score += 3
+        elif fmt == "webm":
+            score += 2
+        elif fmt == "mp4":
+            score += 1
+
+        score += {"ultra": 3, "high": 2, "balanced": 1, "optimized": 0, "tiny": -1}.get(quality, 0)
+        if fps > 30:
+            score += 1
+        if fps <= 20:
+            score -= 1
+        if resolution not in {"", self._tr("keep_original").lower(), "keep original"}:
+            if "1920x1080" in resolution or "2560x" in resolution or "3840x" in resolution:
+                score += 2
+            elif "1280x720" in resolution or "1366x768" in resolution:
+                score += 1
+            elif "640x" in resolution or "854x480" in resolution or "480x" in resolution:
+                score -= 1
+        elif info and getattr(info, "is_valid", False):
+            if info.width >= 1920 or info.height >= 1080:
+                score += 2
+            elif info.width <= 854 and info.height <= 480:
+                score -= 1
+        if duration > 90:
+            score += 1
+
+        if score >= 5:
+            speed = self._tr("estimate_slow")
+            size = self._tr("estimate_large")
+        elif score >= 2:
+            speed = self._tr("estimate_medium")
+            size = self._tr("estimate_medium")
+        else:
+            speed = self._tr("estimate_fast")
+            size = self._tr("estimate_small")
+
+        if fmt == "ogv":
+            compatibility = self._tr("estimate_best")
+        elif fmt == "mp4":
+            compatibility = self._tr("estimate_general")
+        elif fmt == "webm":
+            compatibility = self._tr("estimate_good")
+        else:
+            compatibility = self._tr("estimate_preview")
+        return compatibility, speed, size
+
+    def _summary_expectation(self) -> str:
+        engine = self._engine_key()
+        fmt = self._format_key()
+        if fmt == "ogv":
+            mode = self.ogv_mode.currentText().strip().lower()
+            if mode == "ideal loop":
+                return self._tr("expect_loop")
+            if mode == "seek friendly":
+                return self._tr("expect_seek")
+            if mode in {"mobile optimized", "love2d compatibility"}:
+                return self._tr("expect_safe")
+            if mode in {"high compression", "lightweight"}:
+                return self._tr("expect_small")
+            return self._tr("expect_engine_default", engine=self.engine_profile.currentText())
+        if fmt == "mp4":
+            return self._tr("expect_mp4")
+        if fmt == "webm":
+            return self._tr("expect_webm")
+        return self._tr("expect_gif")
+
+    def _resolution_for_summary(self, info) -> str:
+        current = self.resolution.currentText().strip()
+        if current and current not in self._all_translations("keep_original"):
+            return current
+        if info and getattr(info, "is_valid", False):
+            return f"{info.width}x{info.height}"
+        return self._tr("keep_original")
+
+    def _output_preview_name(self) -> str:
+        path = self._selected_primary_path()
+        stem = Path(path).stem if path else "video"
+        suffix_map = {"ogv": ".ogv", "mp4": ".mp4", "webm": ".webm", "gif": ".gif"}
+        return f"{stem}_converted{suffix_map.get(self._format_key(), '.ogv')}"
+
+    def _render_summary_html(self, info) -> str:
+        title, body = self._current_preset_summary()
+        compatibility, speed, size = self._estimate_levels(info)
+        source_name = Path(self._selected_primary_path()).name if self._selected_primary_path() else self._tr("no_file_selected")
+        items = [
+            f"{self._tr('summary_engine')}: {self.engine_profile.currentText()}",
+            f"{self._tr('summary_target')}: {self.format.currentText()}",
+            f"{self._tr('summary_preset')}: {title}",
+            f"{self._tr('summary_resolution')}: {self._resolution_for_summary(info)}",
+            f"{self._tr('summary_fps')}: {self.fps.value():g}",
+            f"{self._tr('summary_audio')}: {self._tr('audio_kept') if self.keep_audio.isChecked() else self._tr('audio_removed')}",
+            f"{self._tr('summary_output_file')}: {Path(self.output.text().strip() or 'output') / self._output_preview_name()}",
+        ]
+        estimates = [
+            f"{self._tr('estimate_compatibility_label')}: <b>{html.escape(compatibility)}</b>",
+            f"{self._tr('estimate_speed_label')}: <b>{html.escape(speed)}</b>",
+            f"{self._tr('estimate_size_label')}: <b>{html.escape(size)}</b>",
+        ]
+        return (
+            f"<h3>{html.escape(self._tr('summary_title'))}</h3>"
+            f"<p><b>{html.escape(source_name)}</b></p>"
+            f"{_html_list(items)}"
+            f"<p><b>{html.escape(self._tr('summary_expectation'))}</b> {html.escape(self._summary_expectation())}</p>"
+            f"<p><b>{html.escape(self._tr('summary_estimates'))}</b><br>{'<br>'.join(estimates)}</p>"
+            f"<p><b>{html.escape(self._tr('summary_why_title'))}</b> {html.escape(body)}</p>"
+        )
+
+    def _recommendation_bullets(self, info) -> tuple[list[str], list[str], list[str]]:
+        if not info or not getattr(info, "is_valid", False):
+            return [], [], []
+
+        what_has: list[str] = []
+        risks: list[str] = []
+        next_step: list[str] = []
+
+        if info.duration <= 10:
+            what_has.append(self._tr("insight_short_clip"))
+        elif info.duration <= 60:
+            what_has.append(self._tr("insight_medium_clip"))
+        else:
+            what_has.append(self._tr("insight_long_clip"))
+            risks.append(self._tr("risk_long_clip"))
+
+        if info.width >= 1920 or info.height >= 1080:
+            what_has.append(self._tr("insight_high_res"))
+            risks.append(self._tr("risk_large_ogv"))
+        elif info.width <= 854 and info.height <= 480:
+            what_has.append(self._tr("insight_low_res"))
+        else:
+            what_has.append(self._tr("insight_standard_res"))
+
+        if info.frame_rate > 30:
+            risks.append(self._tr("risk_high_fps"))
+        elif info.frame_rate < 20:
+            risks.append(self._tr("risk_low_fps"))
+        else:
+            what_has.append(self._tr("insight_practical_fps"))
+
+        if info.has_audio:
+            what_has.append(self._tr("insight_has_audio"))
+            if not self.keep_audio.isChecked():
+                risks.append(self._tr("risk_audio_removed"))
+        else:
+            what_has.append(self._tr("insight_no_audio"))
+
+        next_step.append(self._summary_expectation())
+        if self._format_key() != "ogv":
+            next_step.append(self._tr("next_try_ogv"))
+        else:
+            next_step.append(self._tr("next_keep_current_preset"))
+
+        if self._format_key() == "ogv" and self.quality.currentText().strip().lower() in {"ultra", "high"}:
+            next_step.append(self._tr("next_if_need_smaller"))
+        elif self._format_key() == "ogv":
+            next_step.append(self._tr("next_if_need_more_quality"))
+        return what_has, risks, next_step
+
+    def _render_guidance_html(self, info) -> str:
+        title, body = self._current_preset_summary()
+        what_has, risks, next_step = self._recommendation_bullets(info)
+        if not what_has and not risks and not next_step:
+            return f"<p>{html.escape(self._tr('no_recommendations'))}</p>"
+        sections = [
+            f"<h3>{html.escape(self._tr('guide_source_title'))}</h3>{_html_list(what_has)}",
+            f"<h3>{html.escape(self._tr('guide_preset_title', preset=title))}</h3><p>{html.escape(body)}</p>",
+            f"<h3>{html.escape(self._tr('guide_next_title'))}</h3>{_html_list(next_step)}",
+        ]
+        if risks:
+            sections.insert(1, f"<h3>{html.escape(self._tr('guide_risks_title'))}</h3>{_html_list(risks)}")
+        return "".join(sections)
+
+    def _refresh_experience_panels(self) -> None:
+        title, body = self._current_preset_summary()
+        self.format_hint.clear()
+        self.preset_group.setTitle(self._tr("preset_group_title"))
+        self.preset_title.setText(f"<b>{html.escape(title)}</b>")
+        self.preset_body.setText(f"<p>{html.escape(body)}</p>")
+        info = self._selected_video_info()
+        self.summary_text.setHtml(self._render_summary_html(info))
+        self.guidance_text.setHtml(self._render_guidance_html(info))
+
     def _apply_language(self) -> None:
         self.setWindowTitle(self._tr("window_title"))
         self.btn_add.setText(self._tr("add_files"))
@@ -507,6 +781,7 @@ class MainWindow(QMainWindow):
         self._update_action_button()
         if self.status.text() in self._all_translations("ready"):
             self.status.setText(self._tr("ready"))
+        self._refresh_experience_panels()
 
     def on_language_changed(self):
         self._apply_language()
@@ -656,26 +931,21 @@ class MainWindow(QMainWindow):
     def refresh_selected_info(self) -> None:
         items = self.files.selectedItems()
         if not items:
-            self.recommend_text.setPlainText("")
+            self._refresh_experience_panels()
             return
 
         src = items[0].text()
         try:
             info = self._cached_probe(src)
             if not info.is_valid:
-                self.recommend_text.setPlainText(self._tr("invalid_video_file", name=Path(src).name))
+                self.guidance_text.setHtml(f"<p>{html.escape(self._tr('invalid_video_file', name=Path(src).name))}</p>")
+                self.summary_text.setHtml(self._render_summary_html(None))
                 return
-            self.recommend_text.setPlainText(
-                get_engine_recommendations(
-                    info,
-                    engine_profile=self.engine_profile.currentText(),
-                    keep_audio=self.keep_audio.isChecked(),
-                    target_format=self.format.currentText(),
-                    language=self._lang_code(),
-                )
-            )
+            self.summary_text.setHtml(self._render_summary_html(info))
+            self.guidance_text.setHtml(self._render_guidance_html(info))
         except Exception:
-            self.recommend_text.setPlainText(self._tr("invalid_video_file", name=Path(src).name))
+            self.guidance_text.setHtml(f"<p>{html.escape(self._tr('invalid_video_file', name=Path(src).name))}</p>")
+            self.summary_text.setHtml(self._render_summary_html(None))
 
     def on_add_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, self._tr("select_videos"))
