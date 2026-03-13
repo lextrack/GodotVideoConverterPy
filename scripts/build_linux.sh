@@ -12,7 +12,7 @@ fi
 python -m pip install -r requirements-dev.txt
 python -m pip install -e .
 
-pyinstaller \
+python -m PyInstaller \
   --noconfirm \
   --clean \
   --name gvc \

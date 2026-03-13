@@ -148,7 +148,7 @@ gvc-gui
 3. Run:
 
 ```bash
-./scripts/build_linux.sh
+bash scripts/build_linux.sh
 ```
 
 Output is generated in `dist/gvc/`.
