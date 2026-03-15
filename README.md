@@ -73,10 +73,6 @@ FFmpeg already does the heavy lifting. This app is useful because it reduces rep
 - Atlas generation in the same tool
 - Lightweight recommendations for format and playback decisions
 
-## License
-
-This project is licensed under the MIT License. See `LICENSE`.
-
 ## Requirements
 
 - Python 3.11+
