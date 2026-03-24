@@ -101,7 +101,7 @@ def _html_list(items: list[str]) -> str:
 
 class Worker(QObject):
     progress = Signal(int)
-    status = Signal(str)
+    status = Signal(object)
     done = Signal(bool)
 
     def __init__(self, fn, cancel_event: Event):
@@ -114,7 +114,10 @@ class Worker(QObject):
             self._fn(self._cancel_event, self.progress.emit, self.status.emit)
             self.done.emit(True)
         except Exception as exc:
-            self.status.emit(f"Error: {exc}")
+            if self._cancel_event.is_set() or "cancel" in str(exc).lower():
+                self.status.emit({"key": "cancelled", "kwargs": {}})
+            else:
+                self.status.emit({"text": f"Error: {exc}"})
             self.done.emit(False)
 
 
@@ -149,6 +152,10 @@ class MainWindow(QMainWindow):
         self._cancel_event: Event | None = None
         self._loading_settings = False
         self._probe_cache = {}
+        self._status_key: str | None = "ready"
+        self._status_kwargs: dict[str, object] = {}
+        self._status_text_override: str | None = None
+        self._progress_started = False
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -419,6 +426,59 @@ class MainWindow(QMainWindow):
         self._apply_language()
         self._update_action_button()
         self._update_ogv_mode_state()
+
+    def _set_status_text(self, text: str) -> None:
+        self._status_key = None
+        self._status_kwargs = {}
+        self._status_text_override = text
+        self.status.setText(text)
+
+    def _set_status_key(self, key: str, **kwargs) -> None:
+        self._status_key = key
+        self._status_kwargs = kwargs
+        self._status_text_override = None
+        self.status.setText(self._tr(key, **kwargs))
+
+    def _refresh_status_label(self) -> None:
+        if self._status_key is not None:
+            self.status.setText(self._tr(self._status_key, **self._status_kwargs))
+            return
+        if self._status_text_override is not None:
+            self.status.setText(self._status_text_override)
+
+    def _handle_worker_status(self, payload: object) -> None:
+        if isinstance(payload, dict) and "key" in payload:
+            self._set_status_key(str(payload["key"]), **dict(payload.get("kwargs") or {}))
+            return
+        if isinstance(payload, dict) and "text" in payload:
+            self._set_status_text(str(payload["text"]))
+            return
+        self._set_status_text(str(payload))
+
+    def _reset_progress_bar(self, indeterminate: bool = False) -> None:
+        self._progress_started = False
+        if indeterminate:
+            self.progress.setRange(0, 0)
+            self.progress.setValue(0)
+            return
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+
+    def _handle_worker_progress(self, value: int) -> None:
+        if not self._progress_started:
+            self._progress_started = True
+            self.progress.setRange(0, 100)
+        self.progress.setValue(value)
+
+    def _is_heavy_video(self, info) -> bool:
+        if not info or not getattr(info, "is_valid", False):
+            return False
+        return (
+            info.width >= 3840
+            or info.height >= 2160
+            or info.frame_rate >= 50
+            or (info.width >= 2560 and info.frame_rate >= 30)
+        )
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
@@ -779,8 +839,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(0, self._tr("tab_convert"))
         self.tabs.setTabText(1, self._tr("tab_atlas"))
         self._update_action_button()
-        if self.status.text() in self._all_translations("ready"):
-            self.status.setText(self._tr("ready"))
+        self._refresh_status_label()
         self._refresh_experience_panels()
 
     def on_language_changed(self):
@@ -878,15 +937,15 @@ class MainWindow(QMainWindow):
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self.progress.setValue)
-        self._worker.status.connect(self.status.setText)
+        self._worker.progress.connect(self._handle_worker_progress)
+        self._worker.status.connect(self._handle_worker_status)
 
         def _done(ok: bool):
             self._set_busy(False)
             if ok and not (self._cancel_event and self._cancel_event.is_set()):
-                self.status.setText(self._tr("done"))
+                self._set_status_key("done")
             elif self._cancel_event and self._cancel_event.is_set():
-                self.status.setText(self._tr("cancelled"))
+                self._set_status_key("cancelled")
             if self._thread:
                 self._thread.quit()
                 self._thread.wait()
@@ -897,7 +956,7 @@ class MainWindow(QMainWindow):
         self._worker.done.connect(_done)
 
         self._set_busy(True)
-        self.progress.setValue(0)
+        self._reset_progress_bar(indeterminate=True)
         self._thread.start()
 
     def _add_files(self, files: list[str]) -> None:
@@ -918,11 +977,11 @@ class MainWindow(QMainWindow):
             added += 1
 
         if added == 0 and rejected > 0:
-            self.status.setText(self._tr("no_valid_files_added"))
+            self._set_status_key("no_valid_files_added")
         elif added > 0 and rejected > 0:
-            self.status.setText(self._tr("added_rejected", added=added, rejected=rejected))
+            self._set_status_key("added_rejected", added=added, rejected=rejected)
         elif added > 0:
-            self.status.setText(self._tr("added_n_files", added=added))
+            self._set_status_key("added_n_files", added=added)
 
         if self.files.count() > 0 and not self.files.selectedItems():
             self.files.setCurrentRow(0)
@@ -961,7 +1020,7 @@ class MainWindow(QMainWindow):
         self.files.clear()
         self._probe_cache.clear()
         self.refresh_selected_info()
-        self.status.setText(self._tr("list_cleared"))
+        self._set_status_key("list_cleared")
 
     def on_output_dir(self):
         folder = QFileDialog.getExistingDirectory(self, self._tr("select_output_folder"), self.output.text())
@@ -997,7 +1056,7 @@ class MainWindow(QMainWindow):
     def on_cancel(self):
         if self._cancel_event:
             self._cancel_event.set()
-            self.status.setText(self._tr("cancelling"))
+            self._set_status_key("cancelling")
 
     def on_convert(self):
         inputs = self._selected_inputs()
@@ -1029,6 +1088,12 @@ class MainWindow(QMainWindow):
             for idx, src in enumerate(inputs, start=1):
                 if cancel_event.is_set():
                     raise RuntimeError("conversion cancelled by user")
+                source_name = Path(src).name
+                status_cb({"key": "preparing_status", "kwargs": {"index": idx, "total": total, "name": source_name}})
+
+                info = self._cached_probe(src)
+                if self._is_heavy_video(info):
+                    status_cb({"key": "heavy_video_status", "kwargs": {"name": source_name}})
 
                 stem = Path(src).stem
                 ext = {"ogv": ".ogv", "mp4": ".mp4", "webm": ".webm", "gif": ".gif"}[convert_cfg["format"]]
@@ -1038,11 +1103,23 @@ class MainWindow(QMainWindow):
                     dst = output / f"{stem}_converted_{counter}{ext}"
                     counter += 1
 
-                status_cb(self._tr("converting_status", index=idx, total=total, name=Path(src).name))
+                status_cb({"key": "converting_status", "kwargs": {"index": idx, "total": total, "name": source_name}})
 
                 def _per_file(p: int):
                     percent = int(((idx - 1) * 100 + p) / total)
                     progress_cb(percent)
+
+                def _per_status(stage: str):
+                    stage_to_key = {
+                        "probe_input": "ffmpeg_probe_status",
+                        "prepare_filters": "ffmpeg_prepare_filters_status",
+                        "ffmpeg_launch": "ffmpeg_launch_status",
+                        "ffmpeg_warmup": "ffmpeg_warmup_status",
+                        "ffmpeg_encoding": "ffmpeg_encoding_status",
+                    }
+                    key = stage_to_key.get(stage)
+                    if key:
+                        status_cb({"key": key, "kwargs": {"name": source_name}})
 
                 convert_video(
                     str(self.ffmpeg),
@@ -1059,6 +1136,7 @@ class MainWindow(QMainWindow):
                         ogv_mode=convert_cfg["ogv_mode"],
                     ),
                     on_progress=_per_file,
+                    on_status=_per_status,
                     cancel_event=cancel_event,
                 )
 
@@ -1095,7 +1173,7 @@ class MainWindow(QMainWindow):
                     dst = output / f"{stem}_atlas_{counter}.png"
                     counter += 1
 
-                status_cb(self._tr("atlas_status", index=idx, total=total, name=Path(src).name))
+                status_cb({"key": "atlas_status", "kwargs": {"index": idx, "total": total, "name": Path(src).name}})
 
                 def _per_file(p: int):
                     percent = int(((idx - 1) * 100 + p) / total)

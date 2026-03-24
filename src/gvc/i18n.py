@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import re
+import string
 import sys
+from dataclasses import dataclass
 
 DEFAULT_LANGUAGE_LABEL = "English"
 
@@ -61,6 +63,13 @@ UI_TEXT = {
         "added_n_files": "Added {added} file(s)",
         "added_rejected": "Added {added} file(s), rejected {rejected} invalid file(s)",
         "no_valid_files_added": "No valid video files added",
+        "preparing_status": "Preparing {index}/{total}: {name}",
+        "heavy_video_status": "Large or high-FPS video detected. Initial startup may take a moment: {name}",
+        "ffmpeg_launch_status": "Launching encoder for {name}",
+        "ffmpeg_probe_status": "Reading source metadata for {name}",
+        "ffmpeg_prepare_filters_status": "Preparing filters for {name}",
+        "ffmpeg_warmup_status": "Encoder is warming up for {name}. This can take longer with 4K or high FPS.",
+        "ffmpeg_encoding_status": "Encoding started for {name}",
         "converting_status": "Converting {index}/{total}: {name}",
         "atlas_status": "Atlas {index}/{total}: {name}",
         "ffmpeg_not_found": "FFmpeg not found",
@@ -202,6 +211,13 @@ UI_TEXT = {
         "added_n_files": "Se agregaron {added} archivo(s)",
         "added_rejected": "Se agregaron {added} archivo(s), se rechazaron {rejected} inválidos",
         "no_valid_files_added": "No se agregaron archivos de video válidos",
+        "preparing_status": "Preparando {index}/{total}: {name}",
+        "heavy_video_status": "Se detectó un video grande o de FPS altos. El arranque inicial puede tardar un poco: {name}",
+        "ffmpeg_launch_status": "Iniciando el codificador para {name}",
+        "ffmpeg_probe_status": "Leyendo metadatos del origen para {name}",
+        "ffmpeg_prepare_filters_status": "Preparando filtros para {name}",
+        "ffmpeg_warmup_status": "El codificador se está inicializando para {name}. Esto puede tardar más con 4K o FPS altos.",
+        "ffmpeg_encoding_status": "La codificación comenzó para {name}",
         "converting_status": "Convirtiendo {index}/{total}: {name}",
         "atlas_status": "Atlas {index}/{total}: {name}",
         "ffmpeg_not_found": "FFmpeg no encontrado",
@@ -211,7 +227,7 @@ UI_TEXT = {
         "format_mp4_title": "Exportación MP4 de cortesía",
         "format_mp4_body": "Útil para compartir, revisar y reproducir fuera del motor, pero no es el objetivo principal del flujo.",
         "format_webm_title": "Exportación WebM de cortesía",
-        "format_webm_body": "Útil para revisiones ligeras y distribuci?n tipo web, pero secundaria frente a OGV en flujos de motor.",
+        "format_webm_body": "Útil para revisiones ligeras y distribución tipo web, pero secundaria frente a OGV en flujos de motor.",
         "format_gif_title": "Exportación GIF de cortesía",
         "format_gif_body": "Útil para previews y bucles de UI, pero no reemplaza la reproducción de video del motor.",
         "preset_official_godot_title": "Official Godot",
@@ -221,7 +237,7 @@ UI_TEXT = {
         "preset_ideal_loop_title": "Ideal Loop",
         "preset_ideal_loop_body": "La mejor opción cuando repetir de forma fluida importa más que el seek aleatorio o la compresión.",
         "preset_mobile_optimized_title": "Mobile Optimized",
-        "preset_mobile_optimized_body": "M?s seguro para hardware modesto y reproducción ligera, sobre todo cuando la estabilidad importa más que la calidad máxima.",
+        "preset_mobile_optimized_body": "Más seguro para hardware modesto y reproducción ligera, sobre todo cuando la estabilidad importa más que la calidad máxima.",
         "preset_high_compression_title": "High Compression",
         "preset_high_compression_body": "Busca archivos más pequeños, pero sacrifica agilidad al saltar dentro del video.",
         "preset_love2d_compatibility_title": "Love2D Compatibility",
@@ -248,7 +264,7 @@ UI_TEXT = {
         "estimate_compatibility_label": "Compatibilidad",
         "estimate_speed_label": "Velocidad de codificación",
         "estimate_size_label": "Tamaño relativo",
-        "estimate_best": "La mejor para reproduccion en motor",
+        "estimate_best": "La mejor para reproducción en motor",
         "estimate_good": "Buena, pero secundaria",
         "estimate_general": "Uso general",
         "estimate_preview": "Orientada a preview",
@@ -284,9 +300,9 @@ UI_TEXT = {
         "insight_has_audio": "La fuente incluye audio.",
         "risk_audio_removed": "Con la configuración actual se quitará el audio en la exportación.",
         "insight_no_audio": "No se detectó audio, lo que simplifica la exportación.",
-        "next_try_ogv": "Si esto es para reproduccion final dentro del motor, mantén OGV como destino principal.",
+        "next_try_ogv": "Si esto es para reproducción final dentro del motor, mantén OGV como destino principal.",
         "next_keep_current_preset": "Este preset ya coincide con el objetivo actual orientado al motor.",
-        "next_if_need_smaller": "Si necesitas un archivo más peque?o, baja la calidad o elige un preset más liviano.",
+        "next_if_need_smaller": "Si necesitas un archivo más pequeño, baja la calidad o elige un preset más liviano.",
         "next_if_need_more_quality": "Si necesitas más calidad visual, sube la calidad antes de aumentar la resolución.",
     },
     "Français": {
@@ -343,6 +359,13 @@ UI_TEXT = {
         "added_n_files": "{added} fichier(s) ajouté(s)",
         "added_rejected": "{added} fichier(s) ajouté(s), {rejected} fichier(s) invalide(s) rejeté(s)",
         "no_valid_files_added": "Aucun fichier vidéo valide ajouté",
+        "preparing_status": "Préparation {index}/{total} : {name}",
+        "heavy_video_status": "Vidéo volumineuse ou à FPS élevés détectée. Le démarrage initial peut prendre un moment : {name}",
+        "ffmpeg_launch_status": "Lancement de l'encodeur pour {name}",
+        "ffmpeg_probe_status": "Lecture des métadonnées source pour {name}",
+        "ffmpeg_prepare_filters_status": "Préparation des filtres pour {name}",
+        "ffmpeg_warmup_status": "L'encodeur se prépare pour {name}. Cela peut prendre plus de temps en 4K ou avec des FPS élevés.",
+        "ffmpeg_encoding_status": "L'encodage a commencé pour {name}",
         "converting_status": "Conversion {index}/{total} : {name}",
         "atlas_status": "Atlas {index}/{total} : {name}",
         "ffmpeg_not_found": "FFmpeg introuvable",
@@ -484,6 +507,13 @@ UI_TEXT = {
         "added_n_files": "{added} Datei(en) hinzugefügt",
         "added_rejected": "{added} Datei(en) hinzugefügt, {rejected} ungültige Datei(en) verworfen",
         "no_valid_files_added": "Keine gültigen Videodateien hinzugefügt",
+        "preparing_status": "Bereite {index}/{total} vor: {name}",
+        "heavy_video_status": "Großes Video oder hohe FPS erkannt. Der erste Start kann etwas dauern: {name}",
+        "ffmpeg_launch_status": "Starte Encoder für {name}",
+        "ffmpeg_probe_status": "Lese Quell-Metadaten für {name}",
+        "ffmpeg_prepare_filters_status": "Bereite Filter für {name} vor",
+        "ffmpeg_warmup_status": "Der Encoder wärmt sich für {name} auf. Das kann bei 4K oder hohen FPS länger dauern.",
+        "ffmpeg_encoding_status": "Kodierung für {name} gestartet",
         "converting_status": "Konvertiere {index}/{total}: {name}",
         "atlas_status": "Atlas {index}/{total}: {name}",
         "ffmpeg_not_found": "FFmpeg nicht gefunden",
@@ -582,6 +612,8 @@ LANGUAGE_CODES = {
 }
 REQUIRED_UI_KEYS = frozenset(UI_TEXT[DEFAULT_LANGUAGE_LABEL].keys())
 _REPORTED_MISSING: set[tuple[str, str]] = set()
+_REPORTED_FORMAT_ERRORS: set[tuple[str, str]] = set()
+_SUSPICIOUS_TEXT_MARKERS = ("Ã", "Â", "â", "\ufffd")
 
 RECOMMENDATIONS_ES_REPLACEMENTS = {
     "Invalid video file": "Archivo de video inválido",
@@ -593,10 +625,10 @@ RECOMMENDATIONS_ES_REPLACEMENTS = {
     "Medium video (10-30s) - Ideal for character animations or environmental loops": "Video medio (10-30s) - Ideal para animaciones de personajes o bucles de entorno",
     "Try 'Official Godot' as the recommended starting point": "Prueba 'Official Godot' como punto de partida recomendado",
     "Long video (30-60s) - Great for cutscenes or character intros": "Video largo (30-60s) - Excelente para cinemáticas o intros de personajes",
-    "Use 'High Compression' if you want a smaller file and do not need fast jumps": "Usa 'High Compression' si quieres un archivo mas pequeno y no necesitas saltos rapidos",
+    "Use 'High Compression' if you want a smaller file and do not need fast jumps": "Usa 'High Compression' si quieres un archivo más pequeño y no necesitas saltos rápidos",
     "Extended video (60-180s) - Suitable for intro cinematics or tutorials": "Video extendido (60-180s) - Adecuado para cinemáticas introductorias o tutoriales",
     "Split into shorter clips for faster loading in Godot": "Divide en clips más cortos para cargar más rápido en Godot",
-    "Use 'Mobile Optimized' for more stable playback on weaker devices": "Usa 'Mobile Optimized' para una reproduccion mas estable en equipos modestos",
+    "Use 'Mobile Optimized' for more stable playback on weaker devices": "Usa 'Mobile Optimized' para una reproducción más estable en equipos modestos",
     "Very long video (180s+) - May impact loading times": "Video muy largo (180s+) - Puede afectar los tiempos de carga",
     "Large files possible with OGV; reduce resolution or FPS": "Con OGV pueden generarse archivos grandes; reduce resolución o FPS",
     "Split into smaller clips or stream externally": "Divide en clips más pequeños o reprodúcelos externamente",
@@ -605,7 +637,7 @@ RECOMMENDATIONS_ES_REPLACEMENTS = {
     "High-res is fine for short splash screens or cutscenes": "Alta resolución va bien para pantallas splash o cinemáticas cortas",
     "Use 1080p for most Godot projects, or 720p for mobiles": "Usa 1080p para la mayoría de proyectos Godot, o 720p para móviles",
     "Low resolution - Great for mobile or retro-style games": "Baja resolución - Excelente para móviles o juegos estilo retro",
-    "Use 'Mobile Optimized' for more predictable playback": "Usa 'Mobile Optimized' para una reproduccion mas predecible",
+    "Use 'Mobile Optimized' for more predictable playback": "Usa 'Mobile Optimized' para una reproducción más predecible",
     "Standard resolution - Suitable for most Godot projects": "Resolución estándar - Adecuada para la mayoría de proyectos Godot",
     "Try 720p for mobiles or 1080p for desktop": "Prueba 720p para móviles o 1080p para escritorio",
     "High FPS short clip - Great for smooth UI effects": "Clip corto con FPS altos - Excelente para efectos fluidos de UI",
@@ -622,45 +654,45 @@ RECOMMENDATIONS_ES_REPLACEMENTS = {
     "Audio will be removed because keep_audio is disabled": "El audio será removido porque keep_audio está desactivado",
     "No audio - Ideal for background loops or visual effects": "Sin audio - Ideal para bucles de fondo o efectos visuales",
     "Use OGV for best compatibility in Godot": "Usa OGV para mejor compatibilidad en Godot",
-    "Source video codec: unknown": "Codec de video de origen: desconocido",
-    "Source audio codec: unknown": "Codec de audio de origen: desconocido",
-    "Widescreen (16:9) - Easy fit for fullscreen scenes and cutscenes": "Panoramico (16:9) - Se adapta facilmente a escenas a pantalla completa y cinematicas",
-    "Classic 4:3 - Useful for retro presentation or stylized UI": "Clasico 4:3 - Util para una presentacion retro o una UI estilizada",
-    "Square (1:1) - Useful for UI, icons, or centered loops": "Cuadrado (1:1) - Util para UI, iconos o bucles centrados",
-    "Ultra-wide (21:9) - May need letterboxing or careful layout": "Ultra panoramico (21:9) - Puede necesitar bandas o una composicion cuidada",
-    "Non-standard aspect ratio - May need cropping, padding, or a custom layout": "Relacion de aspecto no estandar - Puede necesitar recorte, relleno o una composicion personalizada",
+    "Source video codec: unknown": "Códec de video de origen: desconocido",
+    "Source audio codec: unknown": "Códec de audio de origen: desconocido",
+    "Widescreen (16:9) - Easy fit for fullscreen scenes and cutscenes": "Panorámico (16:9) - Se adapta fácilmente a escenas a pantalla completa y cinemáticas",
+    "Classic 4:3 - Useful for retro presentation or stylized UI": "Clásico 4:3 - Útil para una presentación retro o una UI estilizada",
+    "Square (1:1) - Useful for UI, icons, or centered loops": "Cuadrado (1:1) - Útil para UI, iconos o bucles centrados",
+    "Ultra-wide (21:9) - May need letterboxing or careful layout": "Ultra panorámico (21:9) - Puede necesitar bandas o una composición cuidada",
+    "Non-standard aspect ratio - May need cropping, padding, or a custom layout": "Relación de aspecto no estándar - Puede necesitar recorte, relleno o una composición personalizada",
     "MP4 output selected. This is fine for general use, but OGV is recommended for Godot runtime compatibility": "Salida MP4 seleccionada. Sirve para uso general, pero se recomienda OGV para compatibilidad de ejecución en Godot",
     "WebM output selected. This is fine for general use, but OGV is recommended for Godot runtime compatibility": "Salida WebM seleccionada. Sirve para uso general, pero se recomienda OGV para compatibilidad de ejecución en Godot",
     "GIF output selected. Useful for previews/UI loops, but OGV is recommended for in-game video playback in Godot": "Salida GIF seleccionada. Útil para previews/bucles de UI, pero se recomienda OGV para reproducción de video dentro del juego en Godot",
     "OGV is the format natively supported by Godot": "OGV es el formato soportado de forma nativa por Godot",
     "Video looks good for Godot. Use OGV for best compatibility.": "El video se ve bien para Godot. Usa OGV para mejor compatibilidad.",
     "Use 'Seek Friendly' if the video needs to start from different points": "Usa 'Seek Friendly' si el video necesita empezar desde distintos puntos",
-    "You may not need to reconvert unless you want a different size or preset": "Puede que no necesites reconvertirlo salvo que quieras otro tamano o preset",
+    "You may not need to reconvert unless you want a different size or preset": "Puede que no necesites reconvertirlo salvo que quieras otro tamaño o preset",
     "H.264/AVC sources usually convert cleanly to Godot-oriented OGV": "Las fuentes H.264/AVC suelen convertirse bien a OGV orientado a Godot",
-    "WebM sources can work as inputs, but OGV is the safer final target for Godot": "Las fuentes WebM pueden usarse como entrada, pero OGV es el destino final mas seguro para Godot",
-    "Animated GIF sources usually benefit from lower resolution or lower FPS before export": "Las fuentes GIF animadas suelen beneficiarse de una menor resolucion o menos FPS antes de exportar",
+    "WebM sources can work as inputs, but OGV is the safer final target for Godot": "Las fuentes WebM pueden usarse como entrada, pero OGV es el destino final más seguro para Godot",
+    "Animated GIF sources usually benefit from lower resolution or lower FPS before export": "Las fuentes GIF animadas suelen beneficiarse de una menor resolución o menos FPS antes de exportar",
     "Short video (0-10s) - Good for loops, UI effects, or stylized inserts": "Video corto (0-10s) - Bueno para bucles, efectos de UI o inserts estilizados",
     "Medium video (10-60s) - Suitable for in-game scenes or animated screens": "Video medio (10-60s) - Adecuado para escenas dentro del juego o pantallas animadas",
-    "Long video (60s+) - Test playback early on target hardware": "Video largo (60s+) - Prueba la reproduccion temprano en el hardware objetivo",
-    "Long videos are easier to manage when split into shorter scenes": "Los videos largos se manejan mejor si se dividen en escenas mas cortas",
+    "Long video (60s+) - Test playback early on target hardware": "Video largo (60s+) - Prueba la reproducción temprano en el hardware objetivo",
+    "Long videos are easier to manage when split into shorter scenes": "Los videos largos se manejan mejor si se dividen en escenas más cortas",
     "Prefer 1080p or 720p unless the game really needs a larger source": "Prefiere 1080p o 720p salvo que el juego realmente necesite una fuente mayor",
-    "Low resolution - Good fit for lightweight 2D projects": "Resolucion baja - Buena opcion para proyectos 2D livianos",
-    "Standard resolution - Good baseline for Love2D playback": "Resolucion estandar - Buena base para reproduccion en Love2D",
-    "Reduce to 24-30 FPS if you want a lighter OGV for Love2D": "Reduce a 24-30 FPS si quieres un OGV mas liviano para Love2D",
-    "Very low FPS may look choppy; 24-30 FPS is a safer default": "Un FPS muy bajo puede verse entrecortado; 24-30 FPS es un valor mas seguro",
-    "24-30 FPS is a practical target for Love2D video playback": "24-30 FPS es un objetivo practico para reproduccion de video en Love2D",
-    "Embedded audio is supported, but test sync and volume on target platforms": "El audio embebido esta soportado, pero prueba sincronizacion y volumen en las plataformas objetivo",
+    "Low resolution - Good fit for lightweight 2D projects": "Resolución baja - Buena opción para proyectos 2D livianos",
+    "Standard resolution - Good baseline for Love2D playback": "Resolución estándar - Buena base para reproducción en Love2D",
+    "Reduce to 24-30 FPS if you want a lighter OGV for Love2D": "Reduce a 24-30 FPS si quieres un OGV más liviano para Love2D",
+    "Very low FPS may look choppy; 24-30 FPS is a safer default": "Un FPS muy bajo puede verse entrecortado; 24-30 FPS es un valor más seguro",
+    "24-30 FPS is a practical target for Love2D video playback": "24-30 FPS es un objetivo práctico para reproducción de video en Love2D",
+    "Embedded audio is supported, but test sync and volume on target platforms": "El audio embebido está soportado, pero prueba sincronización y volumen en las plataformas objetivo",
     "No audio - Good for decorative loops or background motion": "Sin audio - Bueno para bucles decorativos o movimiento de fondo",
-    "MP4 output selected. Keep OGV for the final Love2D playback path": "Salida MP4 seleccionada. Mantén OGV para la ruta final de reproduccion en Love2D",
-    "WebM output selected. Keep OGV for the final Love2D playback path": "Salida WebM seleccionada. Mantén OGV para la ruta final de reproduccion en Love2D",
+    "MP4 output selected. Keep OGV for the final Love2D playback path": "Salida MP4 seleccionada. Mantén OGV para la ruta final de reproducción en Love2D",
+    "WebM output selected. Keep OGV for the final Love2D playback path": "Salida WebM seleccionada. Mantén OGV para la ruta final de reproducción en Love2D",
     "GIF output selected. Fine for previews, but not as a Love2D video replacement": "Salida GIF seleccionada. Sirve para previews, pero no como reemplazo de video en Love2D",
-    "OGV is the main engine-oriented target for Love2D video playback": "OGV es el objetivo principal orientado al motor para reproduccion de video en Love2D",
+    "OGV is the main engine-oriented target for Love2D video playback": "OGV es el objetivo principal orientado al motor para reproducción de video en Love2D",
     "If a file fails in Love2D, try 'Love2D Compatibility' first": "Si un archivo falla en Love2D, prueba primero 'Love2D Compatibility'",
     "Use 'Ideal Loop' for videos that need to repeat smoothly": "Usa 'Ideal Loop' para videos que deben repetirse de forma fluida",
-    "Use 'Lightweight' if you want a smaller file": "Usa 'Lightweight' si quieres un archivo mas pequeno",
-    "You may not need to reconvert unless you want a smaller file or a different preset": "Puede que no necesites reconvertirlo salvo que quieras un archivo mas pequeno o un preset distinto",
-    "H.264/AVC sources are a practical starting point before converting to OGV": "Las fuentes H.264/AVC son un punto de partida practico antes de convertir a OGV",
-    "WebM sources are fine as inputs, but OGV is the safer final target for Love2D": "Las fuentes WebM sirven como entrada, pero OGV es el destino final mas seguro para Love2D",
+    "Use 'Lightweight' if you want a smaller file": "Usa 'Lightweight' si quieres un archivo más pequeño",
+    "You may not need to reconvert unless you want a smaller file or a different preset": "Puede que no necesites reconvertirlo salvo que quieras un archivo más pequeño o un preset distinto",
+    "H.264/AVC sources are a practical starting point before converting to OGV": "Las fuentes H.264/AVC son un punto de partida práctico antes de convertir a OGV",
+    "WebM sources are fine as inputs, but OGV is the safer final target for Love2D": "Las fuentes WebM sirven como entrada, pero OGV es el destino final más seguro para Love2D",
     "Video looks good for Love2D. Use OGV for best compatibility.": "El video se ve bien para Love2D. Usa OGV para mejor compatibilidad.",
 }
 
@@ -825,13 +857,138 @@ RECOMMENDATIONS_DE_REPLACEMENTS = {
 }
 
 
+@dataclass(frozen=True)
+class RecommendationProfile:
+    replacements: dict[str, str]
+    regex_rules: tuple[tuple[str, str], ...]
+
+
+_RECOMMENDATION_REGEX_RULES = {
+    "de": (
+        (r"Source codec \((.+?)\) is already OGV-compatible for Godot", r"Der Quellcodec (\1) ist bereits OGV-kompatibel für Godot"),
+        (r"Converting from (.+?) to OGV is recommended for Godot compatibility", r"Die Umwandlung von \1 nach OGV wird für die Kompatibilität mit Godot empfohlen"),
+        (r"Source video codec: (.+?) - already in the OGV/Theora family", r"Quell-Videocodec: \1 - bereits in der OGV/Theora-Familie"),
+        (r"Source video codec: (.+?) - common source format for exported videos", r"Quell-Videocodec: \1 - gängiges Quellformat für exportierte Videos"),
+        (r"Source video codec: (.+?) - web-oriented source video format", r"Quell-Videocodec: \1 - weborientiertes Videoformat"),
+        (r"Source video codec: (.+?) - animated image style source", r"Quell-Videocodec: \1 - Quelle im Stil eines animierten Bildes"),
+        (r"Source video codec: (.+)", r"Quell-Videocodec: \1"),
+        (r"Source audio codec: (.+?) - common in MP4 exports", r"Quell-Audiocodec: \1 - häufig in MP4-Exporten"),
+        (r"Source audio codec: (.+?) - already close to OGV workflows", r"Quell-Audiocodec: \1 - bereits nah an OGV-Workflows"),
+        (r"Source audio codec: (.+?) - efficient web-oriented audio", r"Quell-Audiocodec: \1 - effizientes weborientiertes Audio"),
+        (r"Source audio codec: (.+?) - common compressed audio", r"Quell-Audiocodec: \1 - gängiges komprimiertes Audio"),
+        (r"Source audio codec: (.+?) - uncompressed or near-uncompressed audio", r"Quell-Audiocodec: \1 - unkomprimiertes oder nahezu unkomprimiertes Audio"),
+        (r"Source audio codec: (.+)", r"Quell-Audiocodec: \1"),
+        (r"Source codec \((.+?)\) is already OGV-compatible for Love2D", r"Der Quellcodec (\1) ist bereits OGV-kompatibel für Love2D"),
+        (r"Converting from (.+?) to OGV is recommended for Love2D compatibility", r"Die Umwandlung von \1 nach OGV wird für die Kompatibilität mit Love2D empfohlen"),
+    ),
+    "fr": (
+        (r"Source codec \((.+?)\) is already OGV-compatible for Godot", r"Le codec source (\1) est déjà compatible OGV pour Godot"),
+        (r"Converting from (.+?) to OGV is recommended for Godot compatibility", r"La conversion de \1 vers OGV est recommandée pour la compatibilité avec Godot"),
+        (r"Source video codec: (.+?) - already in the OGV/Theora family", r"Codec vidéo source : \1 - déjà dans la famille OGV/Theora"),
+        (r"Source video codec: (.+?) - common source format for exported videos", r"Codec vidéo source : \1 - format source courant pour les vidéos exportées"),
+        (r"Source video codec: (.+?) - web-oriented source video format", r"Codec vidéo source : \1 - format vidéo orienté web"),
+        (r"Source video codec: (.+?) - animated image style source", r"Codec vidéo source : \1 - source de type image animée"),
+        (r"Source video codec: (.+)", r"Codec vidéo source : \1"),
+        (r"Source audio codec: (.+?) - common in MP4 exports", r"Codec audio source : \1 - courant dans les exports MP4"),
+        (r"Source audio codec: (.+?) - already close to OGV workflows", r"Codec audio source : \1 - déjà proche des flux OGV"),
+        (r"Source audio codec: (.+?) - efficient web-oriented audio", r"Codec audio source : \1 - audio efficace orienté web"),
+        (r"Source audio codec: (.+?) - common compressed audio", r"Codec audio source : \1 - audio compressé courant"),
+        (r"Source audio codec: (.+?) - uncompressed or near-uncompressed audio", r"Codec audio source : \1 - audio non compressé ou presque"),
+        (r"Source audio codec: (.+)", r"Codec audio source : \1"),
+        (r"Source codec \((.+?)\) is already OGV-compatible for Love2D", r"Le codec source (\1) est déjà compatible OGV pour Love2D"),
+        (r"Converting from (.+?) to OGV is recommended for Love2D compatibility", r"La conversion de \1 vers OGV est recommandée pour la compatibilité avec Love2D"),
+    ),
+    "es": (
+        (r"Source codec \((.+?)\) is already OGV-compatible for Godot", r"El códec de origen (\1) ya es compatible con OGV para Godot"),
+        (r"Converting from (.+?) to OGV is recommended for Godot compatibility", r"Se recomienda convertir de \1 a OGV para compatibilidad con Godot"),
+        (r"Source video codec: (.+?) - already in the OGV/Theora family", r"Códec de video de origen: \1 - ya está en la familia OGV/Theora"),
+        (r"Source video codec: (.+?) - common source format for exported videos", r"Códec de video de origen: \1 - formato de origen común en videos exportados"),
+        (r"Source video codec: (.+?) - web-oriented source video format", r"Códec de video de origen: \1 - formato de video orientado a web"),
+        (r"Source video codec: (.+?) - animated image style source", r"Códec de video de origen: \1 - fuente de estilo imagen animada"),
+        (r"Source video codec: (.+)", r"Códec de video de origen: \1"),
+        (r"Source audio codec: (.+?) - common in MP4 exports", r"Códec de audio de origen: \1 - común en exportaciones MP4"),
+        (r"Source audio codec: (.+?) - already close to OGV workflows", r"Códec de audio de origen: \1 - ya está cerca de los flujos OGV"),
+        (r"Source audio codec: (.+?) - efficient web-oriented audio", r"Códec de audio de origen: \1 - audio eficiente orientado a web"),
+        (r"Source audio codec: (.+?) - common compressed audio", r"Códec de audio de origen: \1 - audio comprimido común"),
+        (r"Source audio codec: (.+?) - uncompressed or near-uncompressed audio", r"Códec de audio de origen: \1 - audio sin comprimir o casi sin comprimir"),
+        (r"Source audio codec: (.+)", r"Códec de audio de origen: \1"),
+        (r"Source codec \((.+?)\) is already OGV-compatible for Love2D", r"El códec de origen (\1) ya es compatible con OGV para Love2D"),
+        (r"Converting from (.+?) to OGV is recommended for Love2D compatibility", r"Se recomienda convertir de \1 a OGV para compatibilidad con Love2D"),
+    ),
+}
+
+RECOMMENDATION_PROFILES = {
+    "de": RecommendationProfile(RECOMMENDATIONS_DE_REPLACEMENTS, _RECOMMENDATION_REGEX_RULES["de"]),
+    "fr": RecommendationProfile(RECOMMENDATIONS_FR_REPLACEMENTS, _RECOMMENDATION_REGEX_RULES["fr"]),
+    "es": RecommendationProfile(RECOMMENDATIONS_ES_REPLACEMENTS, _RECOMMENDATION_REGEX_RULES["es"]),
+}
+
+
 def normalize_language_label(language: str) -> str:
-    return language if language in UI_TEXT else DEFAULT_LANGUAGE_LABEL
+    if language in UI_TEXT:
+        return language
+    normalized = (language or "").strip()
+    aliases = {
+        "english": "English",
+        "en": "English",
+        "español": "Español",
+        "espanol": "Español",
+        "es": "Español",
+        "français": "Français",
+        "francais": "Français",
+        "fr": "Français",
+        "deutsch": "Deutsch",
+        "de": "Deutsch",
+    }
+    return aliases.get(normalized.casefold(), DEFAULT_LANGUAGE_LABEL)
 
 
 def language_label_to_code(language: str) -> str:
     label = normalize_language_label(language)
     return LANGUAGE_CODES.get(label, "en")
+
+
+def _extract_placeholders(text: str) -> set[str]:
+    placeholders: set[str] = set()
+    for _, field_name, _, _ in string.Formatter().parse(text):
+        if field_name:
+            placeholders.add(field_name)
+    return placeholders
+
+
+def _find_placeholder_issues() -> dict[str, list[str]]:
+    issues: dict[str, list[str]] = {}
+    default_table = UI_TEXT[DEFAULT_LANGUAGE_LABEL]
+    for label, table in UI_TEXT.items():
+        if label == DEFAULT_LANGUAGE_LABEL:
+            continue
+        mismatches: list[str] = []
+        for key in REQUIRED_UI_KEYS:
+            default_text = default_table[key]
+            localized_text = table.get(key)
+            if localized_text is None:
+                continue
+            default_fields = _extract_placeholders(default_text)
+            localized_fields = _extract_placeholders(localized_text)
+            if default_fields != localized_fields:
+                mismatches.append(
+                    f"{key} -> placeholders {sorted(localized_fields)} expected {sorted(default_fields)}"
+                )
+        if mismatches:
+            issues[label] = mismatches
+    return issues
+
+
+def _find_suspicious_catalog_text() -> dict[str, list[str]]:
+    issues: dict[str, list[str]] = {}
+    for label, table in UI_TEXT.items():
+        suspicious: list[str] = []
+        for key, value in table.items():
+            if any(marker in value for marker in _SUSPICIOUS_TEXT_MARKERS):
+                suspicious.append(f"{key} -> {value}")
+        if suspicious:
+            issues[label] = suspicious
+    return issues
 
 
 def validate_ui_catalog() -> tuple[dict[str, list[str]], dict[str, list[str]]]:
@@ -850,7 +1007,9 @@ def validate_ui_catalog() -> tuple[dict[str, list[str]], dict[str, list[str]]]:
 
 def _report_catalog_issues_once() -> None:
     missing, extra = validate_ui_catalog()
-    if not missing and not extra:
+    placeholder_issues = _find_placeholder_issues()
+    suspicious_text = _find_suspicious_catalog_text()
+    if not missing and not extra and not placeholder_issues and not suspicious_text:
         return
 
     lines = ["[gvc.i18n] Translation catalog issues detected:"]
@@ -858,6 +1017,10 @@ def _report_catalog_issues_once() -> None:
         lines.append(f"  - {label}: missing keys -> {', '.join(keys)}")
     for label, keys in extra.items():
         lines.append(f"  - {label}: extra keys -> {', '.join(keys)}")
+    for label, entries in placeholder_issues.items():
+        lines.append(f"  - {label}: placeholder mismatches -> {'; '.join(entries)}")
+    for label, entries in suspicious_text.items():
+        lines.append(f"  - {label}: suspicious text -> {'; '.join(entries)}")
     message = "\n".join(lines)
 
     if os.getenv("GVC_I18N_STRICT", "").lower() in {"1", "true", "yes"}:
@@ -886,256 +1049,36 @@ def ui_text(language: str, key: str, **kwargs) -> str:
                     f"[gvc.i18n] Missing translation key '{key}' for language '{label}', using English fallback.",
                     file=sys.stderr,
                 )
-    return text.format(**kwargs) if kwargs else text
+    if not kwargs:
+        return text
+    try:
+        return text.format(**kwargs)
+    except (IndexError, KeyError, ValueError) as exc:
+        report_key = (label, key)
+        if report_key not in _REPORTED_FORMAT_ERRORS:
+            _REPORTED_FORMAT_ERRORS.add(report_key)
+            if os.getenv("GVC_I18N_WARN", "1").lower() not in {"0", "false", "no"}:
+                print(
+                    f"[gvc.i18n] Format error for key '{key}' in language '{label}': {exc}.",
+                    file=sys.stderr,
+                )
+        fallback_text = default_table.get(key, text)
+        try:
+            return fallback_text.format(**kwargs)
+        except (IndexError, KeyError, ValueError):
+            return fallback_text
 
 
 def translate_recommendations(text: str, language: str) -> str:
-    if language == "de":
-        out = text
-        for en_text, de_text in RECOMMENDATIONS_DE_REPLACEMENTS.items():
-            out = out.replace(en_text, de_text)
-
-        out = re.sub(
-            r"Source codec \((.+?)\) is already OGV-compatible for Godot",
-            r"Der Quellcodec (\1) ist bereits OGV-kompatibel für Godot",
-            out,
-        )
-        out = re.sub(
-            r"Converting from (.+?) to OGV is recommended for Godot compatibility",
-            r"Die Umwandlung von \1 nach OGV wird für die Kompatibilität mit Godot empfohlen",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - already in the OGV/Theora family",
-            r"Quell-Videocodec: \1 - bereits in der OGV/Theora-Familie",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - common source format for exported videos",
-            r"Quell-Videocodec: \1 - gängiges Quellformat für exportierte Videos",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - web-oriented source video format",
-            r"Quell-Videocodec: \1 - weborientiertes Videoformat",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - animated image style source",
-            r"Quell-Videocodec: \1 - Quelle im Stil eines animierten Bildes",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+)",
-            r"Quell-Videocodec: \1",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - common in MP4 exports",
-            r"Quell-Audiocodec: \1 - häufig in MP4-Exporten",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - already close to OGV workflows",
-            r"Quell-Audiocodec: \1 - bereits nah an OGV-Workflows",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - efficient web-oriented audio",
-            r"Quell-Audiocodec: \1 - effizientes weborientiertes Audio",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - common compressed audio",
-            r"Quell-Audiocodec: \1 - gängiges komprimiertes Audio",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - uncompressed or near-uncompressed audio",
-            r"Quell-Audiocodec: \1 - unkomprimiertes oder nahezu unkomprimiertes Audio",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+)",
-            r"Quell-Audiocodec: \1",
-            out,
-        )
-        out = re.sub(
-            r"Source codec \((.+?)\) is already OGV-compatible for Love2D",
-            r"Der Quellcodec (\1) ist bereits OGV-kompatibel für Love2D",
-            out,
-        )
-        out = re.sub(
-            r"Converting from (.+?) to OGV is recommended for Love2D compatibility",
-            r"Die Umwandlung von \1 nach OGV wird für die Kompatibilität mit Love2D empfohlen",
-            out,
-        )
-        return out
-
-    if language == "fr":
-        out = text
-        for en_text, fr_text in RECOMMENDATIONS_FR_REPLACEMENTS.items():
-            out = out.replace(en_text, fr_text)
-
-        out = re.sub(
-            r"Source codec \((.+?)\) is already OGV-compatible for Godot",
-            r"Le codec source (\1) est d?j? compatible OGV pour Godot",
-            out,
-        )
-        out = re.sub(
-            r"Converting from (.+?) to OGV is recommended for Godot compatibility",
-            r"La conversion de \1 vers OGV est recommandée pour la compatibilité avec Godot",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - already in the OGV/Theora family",
-            r"Codec vidéo source : \1 - déjà dans la famille OGV/Theora",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - common source format for exported videos",
-            r"Codec vidéo source : \1 - format source courant pour les vidéos exportées",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - web-oriented source video format",
-            r"Codec vidéo source : \1 - format vidéo orienté web",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+?) - animated image style source",
-            r"Codec vidéo source : \1 - source de type image animée",
-            out,
-        )
-        out = re.sub(
-            r"Source video codec: (.+)",
-            r"Codec vidéo source : \1",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - common in MP4 exports",
-            r"Codec audio source : \1 - courant dans les exports MP4",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - already close to OGV workflows",
-            r"Codec audio source : \1 - déjà proche des flux OGV",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - efficient web-oriented audio",
-            r"Codec audio source : \1 - audio efficace orienté web",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - common compressed audio",
-            r"Codec audio source : \1 - audio compresse courant",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+?) - uncompressed or near-uncompressed audio",
-            r"Codec audio source : \1 - audio non compresse ou presque",
-            out,
-        )
-        out = re.sub(
-            r"Source audio codec: (.+)",
-            r"Codec audio source : \1",
-            out,
-        )
-        out = re.sub(
-            r"Source codec \((.+?)\) is already OGV-compatible for Love2D",
-            r"Le codec source (\1) est d?j? compatible OGV pour Love2D",
-            out,
-        )
-        out = re.sub(
-            r"Converting from (.+?) to OGV is recommended for Love2D compatibility",
-            r"La conversion de \1 vers OGV est recommandée pour la compatibilité avec Love2D",
-            out,
-        )
-        return out
-
-    if language != "es":
+    profile = RECOMMENDATION_PROFILES.get(language_label_to_code(language))
+    if profile is None:
         return text
 
     out = text
-    for en_text, es_text in RECOMMENDATIONS_ES_REPLACEMENTS.items():
-        out = out.replace(en_text, es_text)
-
-    out = re.sub(
-        r"Source codec \((.+?)\) is already OGV-compatible for Godot",
-        r"El códec de origen (\1) ya es compatible con OGV para Godot",
-        out,
-    )
-    out = re.sub(
-        r"Converting from (.+?) to OGV is recommended for Godot compatibility",
-        r"Se recomienda convertir de \1 a OGV para compatibilidad con Godot",
-        out,
-    )
-    out = re.sub(
-        r"Source video codec: (.+?) - already in the OGV/Theora family",
-        r"Codec de video de origen: \1 - ya está en la familia OGV/Theora",
-        out,
-    )
-    out = re.sub(
-        r"Source video codec: (.+?) - common source format for exported videos",
-        r"Codec de video de origen: \1 - formato de origen com?n en videos exportados",
-        out,
-    )
-    out = re.sub(
-        r"Source video codec: (.+?) - web-oriented source video format",
-        r"Codec de video de origen: \1 - formato de vídeo orientado a web",
-        out,
-    )
-    out = re.sub(
-        r"Source video codec: (.+?) - animated image style source",
-        r"Codec de video de origen: \1 - fuente de estilo imagen animada",
-        out,
-    )
-    out = re.sub(
-        r"Source video codec: (.+)",
-        r"Codec de video de origen: \1",
-        out,
-    )
-    out = re.sub(
-        r"Source audio codec: (.+?) - common in MP4 exports",
-        r"Codec de audio de origen: \1 - com?n en exportaciones MP4",
-        out,
-    )
-    out = re.sub(
-        r"Source audio codec: (.+?) - already close to OGV workflows",
-        r"Codec de audio de origen: \1 - ya está cerca de los flujos OGV",
-        out,
-    )
-    out = re.sub(
-        r"Source audio codec: (.+?) - efficient web-oriented audio",
-        r"Codec de audio de origen: \1 - audio eficiente orientado a web",
-        out,
-    )
-    out = re.sub(
-        r"Source audio codec: (.+?) - common compressed audio",
-        r"Codec de audio de origen: \1 - audio comprimido com?n",
-        out,
-    )
-    out = re.sub(
-        r"Source audio codec: (.+?) - uncompressed or near-uncompressed audio",
-        r"Codec de audio de origen: \1 - audio sin comprimir o casi sin comprimir",
-        out,
-    )
-    out = re.sub(
-        r"Source audio codec: (.+)",
-        r"Codec de audio de origen: \1",
-        out,
-    )
-    out = re.sub(
-        r"Source codec \((.+?)\) is already OGV-compatible for Love2D",
-        r"El códec de origen (\1) ya es compatible con OGV para Love2D",
-        out,
-    )
-    out = re.sub(
-        r"Converting from (.+?) to OGV is recommended for Love2D compatibility",
-        r"Se recomienda convertir de \1 a OGV para compatibilidad con Love2D",
-        out,
-    )
+    for source, replacement in profile.replacements.items():
+        out = out.replace(source, replacement)
+    for pattern, replacement in profile.regex_rules:
+        out = re.sub(pattern, replacement, out)
     return out
 
 

@@ -285,6 +285,7 @@ def convert_video(
     input_file: str,
     options: ConvertOptions,
     on_progress=None,
+    on_status=None,
     cancel_event=None,
 ) -> str:
     src = Path(input_file)
@@ -295,6 +296,8 @@ def convert_video(
     out = Path(options.output_file)
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    if on_status:
+        on_status("probe_input")
     info = probe_video(ffprobe_path, input_file)
     total_seconds = info.duration if info.duration > 0 else None
 
@@ -302,6 +305,8 @@ def convert_video(
     if not options.keep_audio or options.fmt == "gif":
         codec_audio = ["-an"]
 
+    if on_status:
+        on_status("prepare_filters")
     filter_chain = _build_filter_chain(options.fmt, options.fps, options.resolution, options.quality)
 
     args = ["-y", "-i", input_file]
@@ -318,6 +323,7 @@ def convert_video(
         args,
         total_seconds=total_seconds,
         on_progress=on_progress,
+        on_status=on_status,
         cancel_event=cancel_event,
     )
     return str(out)
