@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -293,8 +294,11 @@ def convert_video(
         raise FileNotFoundError(f"Input file not found: {src.name}")
     _validate_video_fps(options.fps)
 
-    out = Path(options.output_file)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    final_out = Path(options.output_file)
+    final_out.parent.mkdir(parents=True, exist_ok=True)
+    temp_out = final_out.with_name(f"{final_out.stem}.part{final_out.suffix}")
+    if temp_out.exists():
+        temp_out.unlink()
 
     if on_status:
         on_status("probe_input")
@@ -316,14 +320,20 @@ def convert_video(
     args.extend(codec_video)
     args.extend(codec_audio)
     args.extend(extra)
-    args.append(str(out))
+    args.append(str(temp_out))
 
-    run_ffmpeg(
-        ffmpeg_path,
-        args,
-        total_seconds=total_seconds,
-        on_progress=on_progress,
-        on_status=on_status,
-        cancel_event=cancel_event,
-    )
-    return str(out)
+    try:
+        run_ffmpeg(
+            ffmpeg_path,
+            args,
+            total_seconds=total_seconds,
+            on_progress=on_progress,
+            on_status=on_status,
+            cancel_event=cancel_event,
+        )
+        temp_out.replace(final_out)
+        return str(final_out)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            temp_out.unlink()
+        raise

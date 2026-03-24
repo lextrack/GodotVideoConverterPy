@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,6 +102,9 @@ def _generate_sprite_atlas_ffmpeg(
 
     out = Path(output_file)
     out.parent.mkdir(parents=True, exist_ok=True)
+    temp_out = out.with_name(f"{out.stem}.part{out.suffix}")
+    if temp_out.exists():
+        temp_out.unlink()
 
     args = [
         "-y",
@@ -110,15 +114,21 @@ def _generate_sprite_atlas_ffmpeg(
         "1",
         "-vf",
         ",".join(filters),
-        str(out),
+        str(temp_out),
     ]
-    run_ffmpeg(
-        ffmpeg_path,
-        args,
-        total_seconds=info.duration,
-        on_progress=on_progress,
-        cancel_event=cancel_event,
-    )
+    try:
+        run_ffmpeg(
+            ffmpeg_path,
+            args,
+            total_seconds=info.duration,
+            on_progress=on_progress,
+            cancel_event=cancel_event,
+        )
+        temp_out.replace(out)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            temp_out.unlink()
+        raise
 
     return AtlasResult(
         output_file=str(out),
@@ -249,9 +259,18 @@ def _generate_sprite_atlas_opencv(
 
     out = Path(output_file)
     out.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(atlas, mode="RGBA").save(out, optimize=True)
-    if on_progress:
-        on_progress(100)
+    temp_out = out.with_name(f"{out.stem}.part{out.suffix}")
+    if temp_out.exists():
+        temp_out.unlink()
+    try:
+        Image.fromarray(atlas, mode="RGBA").save(temp_out, optimize=True)
+        temp_out.replace(out)
+        if on_progress:
+            on_progress(100)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            temp_out.unlink()
+        raise
 
     return AtlasResult(
         output_file=str(out),
