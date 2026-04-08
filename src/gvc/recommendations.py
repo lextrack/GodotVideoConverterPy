@@ -123,7 +123,7 @@ def get_godot_recommendations(
 
     if video.duration <= 10:
         s.what_has.append("Short video (0-10s) - Perfect for UI animations or button effects")
-        s.next_step.append("Use 'Ideal Loop' for videos that need to repeat smoothly")
+        s.next_step.append("Use 'Ideal Loop' only when seamless repetition matters more than file size")
         if video.frame_rate < 30:
             s.next_step.append("Increase to 30 FPS for smoother UI animations")
     elif video.duration <= 30:
@@ -131,15 +131,16 @@ def get_godot_recommendations(
         s.next_step.append("Try 'Official Godot' as the recommended starting point")
     elif video.duration <= 60:
         s.what_has.append("Long video (30-60s) - Great for cutscenes or character intros")
-        s.next_step.append("Use 'High Compression' if you want a smaller file and do not need fast jumps")
+        s.next_step.append("Start with 'Official Godot'; use 'High Compression' only if file size matters more than quick seeking")
     elif video.duration <= 180:
         s.what_has.append("Extended video (60-180s) - Suitable for intro cinematics or tutorials")
         s.next_step.append("Split into shorter clips for faster loading in Godot")
-        s.next_step.append("Use 'Mobile Optimized' for more stable playback on weaker devices")
+        s.next_step.append("Use 'Mobile Optimized' for steadier playback, or 'High Compression' if size is the main concern")
     else:
         s.what_has.append("Very long video (180s+) - May impact loading times")
         s.next_step.append("Large files possible with OGV; reduce resolution or FPS")
         s.next_step.append("Split into smaller clips or stream externally")
+        s.next_step.append("Avoid 'Ideal Loop' on long videos unless the clip is very short and truly loop-focused")
 
     if video.width > 1920 or video.height > 1080:
         s.what_has.append("High resolution detected")
@@ -208,6 +209,8 @@ def get_godot_recommendations(
             elif source_family == "gif":
                 s.next_step.append("Animated GIF sources usually benefit from lower resolution or lower FPS before export")
         s.next_step.append("Use 'Seek Friendly' if the video needs to start from different points")
+        if video.duration > 60:
+            s.next_step.append("For longer clips, prefer 'Official Godot', 'Mobile Optimized', or 'High Compression' before trying 'Ideal Loop'")
     elif target == "mp4":
         s.next_step.append(
             "MP4 output selected. This is fine for general use, but OGV is recommended for Godot runtime compatibility"
@@ -249,12 +252,13 @@ def get_love2d_recommendations(
 
     if video.duration <= 10:
         s.what_has.append("Short video (0-10s) - Good for loops, UI effects, or stylized inserts")
-        s.next_step.append("Use 'Ideal Loop' for videos that need to repeat smoothly")
+        s.next_step.append("Use 'Ideal Loop' only when the clip is short and the repeat must feel seamless")
     elif video.duration <= 60:
         s.what_has.append("Medium video (10-60s) - Suitable for in-game scenes or animated screens")
     else:
         s.what_has.append("Long video (60s+) - Test playback early on target hardware")
         s.next_step.append("Long videos are easier to manage when split into shorter scenes")
+        s.next_step.append("Start with 'Love2D Compatibility' or 'Lightweight' before trying more aggressive loop settings")
 
     if video.width > 1920 or video.height > 1080:
         s.what_has.append("High resolution detected")
@@ -304,6 +308,8 @@ def get_love2d_recommendations(
         s.next_step.append("If a file fails in Love2D, try 'Love2D Compatibility' first")
         s.next_step.append("Use 'Seek Friendly' if the video needs to start from different points")
         s.next_step.append("Use 'Lightweight' if you want a smaller file")
+        if video.duration > 60:
+            s.next_step.append("Avoid 'Ideal Loop' on longer Love2D clips unless the video is a short decorative loop")
     elif target == "mp4":
         s.next_step.append("MP4 output selected. Keep OGV for the final Love2D playback path")
     elif target == "webm":

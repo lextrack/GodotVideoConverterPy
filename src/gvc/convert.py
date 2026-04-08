@@ -36,6 +36,11 @@ OGV_QUALITY_PROFILES = {
     "tiny": ("4", "4"),
 }
 
+# OGV presets stay intentionally simple: quality controls VBR level, while
+# engine presets mainly adjust GOP/keyframe cadence and playback robustness.
+OGV_LOOP_GOP = "12"
+OGV_LOOP_MIN_KEYINT = "1"
+
 
 @dataclass(slots=True)
 class ConvertOptions:
@@ -120,17 +125,17 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "64",
+            "48",
             "-keyint_min",
-            "32",
+            "24",
         ],
         "seek friendly": [
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "32",
+            "24",
             "-keyint_min",
-            "16",
+            "12",
             "-fps_mode",
             "cfr",
         ],
@@ -138,9 +143,9 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "1",
+            OGV_LOOP_GOP,
             "-keyint_min",
-            "1",
+            OGV_LOOP_MIN_KEYINT,
             "-avoid_negative_ts",
             "make_zero",
             "-fflags",
@@ -150,9 +155,9 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "48",
+            "72",
             "-keyint_min",
-            "24",
+            "36",
             "-fps_mode",
             "cfr",
         ],
@@ -160,11 +165,11 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "256",
+            "240",
             "-keyint_min",
-            "64",
+            "60",
         ],
-        # Backward compatibility with previous saved settings.
+        # Backward compatibility with previous saved settings only.
         "standard": ["-pix_fmt", "yuv420p", "-g", "30", "-keyint_min", "30"],
         "constant fps (cfr)": ["-pix_fmt", "yuv420p", "-g", "15", "-keyint_min", "15", "-fps_mode", "cfr"],
         "optimized for weak hardware": ["-pix_fmt", "yuv420p", "-g", "60", "-keyint_min", "30", "-threads", "4"],
@@ -175,9 +180,9 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "16",
+            "24",
             "-keyint_min",
-            "8",
+            "12",
             "-fps_mode",
             "cfr",
         ],
@@ -185,9 +190,9 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "8",
+            "12",
             "-keyint_min",
-            "4",
+            "6",
             "-fps_mode",
             "cfr",
         ],
@@ -195,9 +200,9 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "1",
+            OGV_LOOP_GOP,
             "-keyint_min",
-            "1",
+            OGV_LOOP_MIN_KEYINT,
             "-avoid_negative_ts",
             "make_zero",
             "-fflags",
@@ -207,11 +212,11 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
             "-pix_fmt",
             "yuv420p",
             "-g",
-            "48",
+            "72",
             "-keyint_min",
-            "24",
+            "36",
         ],
-        # Backward compatibility if an older config is reused under Love2D.
+        # Backward compatibility if an older config is reused under Love2D only.
         "standard": ["-pix_fmt", "yuv420p", "-g", "24", "-keyint_min", "12"],
     }
 
@@ -219,8 +224,14 @@ def _video_codec_args(fmt: str, quality: str, ogv_mode: str, engine_profile: str
     mode_key = ogv_mode.strip().lower()
     video, audio = _ogv_quality_args(quality)
     if profile == ENGINE_PROFILE_LOVE2D:
-        return video, audio, love2d_modes.get(mode_key, love2d_modes["love2d compatibility"])
-    return video, audio, godot_modes.get(mode_key, godot_modes["official godot"])
+        extra = list(love2d_modes.get(mode_key, love2d_modes["love2d compatibility"]))
+    else:
+        extra = list(godot_modes.get(mode_key, godot_modes["official godot"]))
+
+    # Theora is more reliable when we keep timestamps/frame pacing constant.
+    if "-fps_mode" not in extra:
+        extra.extend(["-fps_mode", "cfr"])
+    return video, audio, extra
 
 
 def _parse_resolution(value: str | None) -> tuple[int, int] | None:
@@ -249,6 +260,10 @@ def _build_filter_chain(fmt: str, fps: float | None, resolution: str | None, qua
             filters.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
         else:
             filters.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
+
+    if fmt == "ogv":
+        # yuv420p-backed outputs are safer when the encoded frame size stays even.
+        filters.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
 
     if fps and fps > 0:
         filters.append(f"fps={fps}")

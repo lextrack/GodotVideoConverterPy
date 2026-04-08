@@ -592,6 +592,30 @@ class MainWindow(QMainWindow):
             return
         combo.setCurrentText(chosen)
 
+    def _ogv_mode_value(self) -> str:
+        data = self.ogv_mode.currentData()
+        if isinstance(data, str) and data.strip():
+            return data
+        return self.ogv_mode.currentText().strip()
+
+    def _ogv_mode_title_key(self, mode: str) -> str:
+        mode_key = (mode or "").strip().lower()
+        return {
+            "official godot": "preset_official_godot_title",
+            "seek friendly": "preset_seek_friendly_title",
+            "ideal loop": "preset_ideal_loop_title",
+            "mobile optimized": "preset_mobile_optimized_title",
+            "high compression": "preset_high_compression_title",
+            "love2d compatibility": "preset_love2d_compatibility_title",
+            "lightweight": "preset_lightweight_title",
+        }.get(mode_key, "")
+
+    def _ogv_mode_label(self, mode: str) -> str:
+        title_key = self._ogv_mode_title_key(mode)
+        if title_key:
+            return self._tr(title_key)
+        return mode
+
     def save_ui_settings(self) -> None:
         if self._loading_settings:
             return
@@ -602,7 +626,7 @@ class MainWindow(QMainWindow):
             selected_format=self.format.currentText(),
             selected_resolution=self.resolution.currentText().strip() or "Keep original",
             selected_quality=self.quality.currentText(),
-            selected_ogv_mode=self.ogv_mode.currentText(),
+            selected_ogv_mode=self._ogv_mode_value(),
             keep_audio=self.keep_audio.isChecked(),
             fps=f"{self.fps.value():g}",
             atlas_fps=self.atlas_fps.value(),
@@ -654,7 +678,7 @@ class MainWindow(QMainWindow):
                 self._tr(f"format_{fmt}_body"),
             )
 
-        mode = self.ogv_mode.currentText().strip().lower()
+        mode = self._ogv_mode_value().strip().lower()
         preset_map = {
             "official godot": ("preset_official_godot_title", "preset_official_godot_body"),
             "seek friendly": ("preset_seek_friendly_title", "preset_seek_friendly_body"),
@@ -679,6 +703,7 @@ class MainWindow(QMainWindow):
         fps = float(self.fps.value())
         resolution = self.resolution.currentText().strip().lower()
         duration = info.duration if info and getattr(info, "is_valid", False) else 0.0
+        ogv_mode = self._ogv_mode_value().strip().lower()
 
         score = 0
         if fmt == "ogv":
@@ -689,6 +714,16 @@ class MainWindow(QMainWindow):
             score += 1
 
         score += {"ultra": 3, "high": 2, "balanced": 1, "optimized": 0, "tiny": -1}.get(quality, 0)
+        if fmt == "ogv":
+            score += {
+                "ideal loop": 2,
+                "seek friendly": 1,
+                "official godot": 1,
+                "love2d compatibility": 1,
+                "mobile optimized": 0,
+                "lightweight": -1,
+                "high compression": -1,
+            }.get(ogv_mode, 0)
         if fps > 30:
             score += 1
         if fps <= 20:
@@ -732,7 +767,7 @@ class MainWindow(QMainWindow):
         engine = self._engine_key()
         fmt = self._format_key()
         if fmt == "ogv":
-            mode = self.ogv_mode.currentText().strip().lower()
+            mode = self._ogv_mode_value().strip().lower()
             if mode == "ideal loop":
                 return self._tr("expect_loop")
             if mode == "seek friendly":
@@ -891,6 +926,7 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setText(self._tr("cancel"))
         self.tabs.setTabText(0, self._tr("tab_convert"))
         self.tabs.setTabText(1, self._tr("tab_atlas"))
+        self._reload_ogv_mode_options(self.engine_profile.currentText(), self._ogv_mode_value())
         self._update_action_button()
         self._refresh_status_label()
         self._refresh_experience_panels()
@@ -966,13 +1002,17 @@ class MainWindow(QMainWindow):
         self.ogv_mode.setEnabled(is_ogv)
 
     def _reload_ogv_mode_options(self, engine_profile: str, selected: str | None = None) -> None:
-        current = selected if selected is not None else self.ogv_mode.currentText()
+        current = (selected if selected is not None else self._ogv_mode_value()).strip()
         options = list(ogv_modes_for_profile(engine_profile))
         self.ogv_mode.blockSignals(True)
         self.ogv_mode.clear()
-        self.ogv_mode.addItems(options)
-        if current in options:
-            self.ogv_mode.setCurrentText(current)
+        for option in options:
+            self.ogv_mode.addItem(self._ogv_mode_label(option), option)
+        idx = self.ogv_mode.findData(current)
+        if idx < 0 and current:
+            idx = self.ogv_mode.findText(current)
+        if idx >= 0:
+            self.ogv_mode.setCurrentIndex(idx)
         else:
             self.ogv_mode.setCurrentIndex(0)
         self.ogv_mode.blockSignals(False)
@@ -1122,7 +1162,7 @@ class MainWindow(QMainWindow):
             "resolution": self.resolution.currentText(),
             "fps": fps_val,
             "keep_audio": self.keep_audio.isChecked(),
-            "ogv_mode": self.ogv_mode.currentText(),
+            "ogv_mode": self._ogv_mode_value(),
         }
 
         def _run(cancel_event: Event, progress_cb, status_cb):

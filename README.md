@@ -1,108 +1,136 @@
 # Godot Video Converter
 
-Desktop utility for converting videos into game-ready formats, with a strong focus on OGV workflows for Godot and atlas generation for 2D pipelines.
+Desktop app for converting videos into game-ready formats, especially `ogv` for Godot, plus sprite atlas generation for 2D workflows.
 
 This project is a Python rewrite of the original [.NET tool](https://github.com/lextrack/GodotVideoConverter).
 
-## What does this app mainly do?
+## Features
 
 - Convert videos to `ogv`, `mp4`, `webm`, and `gif`
-- Switch between `Godot` and `Love2D` engine profiles for OGV-specific presets
-- Apply engine-oriented OGV presets for practical playback workflows
-- Generate PNG sprite atlases from video clips
-- Batch process multiple files from a simple GUI
-- Analyze the selected video before converting
-- Show a simple summary of what the video has and what to do next
-
-## Current Positioning
-
-The app is still centered on Godot, but it now includes a dedicated Love2D OGV profile and engine-specific guidance. Love2D has its own OGV preset family and playback recommendations, while the rest of the output formats remain shared between engine profiles.
+- Use Godot-focused OGV presets
+- Use Love2D-focused OGV presets
+- Generate PNG sprite atlases from video
+- Batch process files from a GUI
+- Analyze source video before export
 
 ## Main Workflows
 
-### 1. Convert Video for Godot
+### Video Conversion
 
-Use this when you want a video file ready for in-engine playback.
+- `ogv` is the main target for Godot playback
+- `mp4`, `webm`, and `gif` are also available
+- Quality, FPS, resolution, audio, and OGV mode can be adjusted from the GUI
 
-- `ogv` is the main target for Godot-oriented workflows
-- The engine profile changes only the `ogv` preset family; `mp4`, `webm`, and `gif` stay the same
-- The `Quality` selector changes the overall image/audio quality; the engine preset changes how the video behaves during playback
-- The app analyzes the selected video and shows two blocks: what the video has, and the recommended next step
-- Those suggestions can change based on duration, resolution, FPS, audio, source codec, aspect ratio, selected engine, and selected output format
-- Godot OGV modes:
-  - `Official Godot`: recommended starting point for most Godot videos
-  - `Seek Friendly`: better if the video needs to start from different points
-  - `Ideal Loop`: better for videos that need to repeat smoothly
-  - `Mobile Optimized`: safer choice for weaker devices
-  - `High Compression`: smaller file, but less agile when jumping through the video
-- Love2D OGV modes:
-  - `Love2D Compatibility`: safest starting point for Love2D
-  - `Seek Friendly`: better if the video needs to start from different points
-  - `Ideal Loop`: better for videos that need to repeat smoothly
-  - `Lightweight`: smaller file for simple or decorative playback
-- You can also export to `mp4`, `webm`, or `gif`
-- Resolution, FPS, and audio handling can be adjusted from the GUI
+Godot OGV modes:
 
-### 2. Generate Atlas from a Video
+- `Official Godot`
+- `Seek Friendly`
+- `Ideal Loop`
+- `Mobile Optimized`
+- `High Compression`
 
-Use this when the video is really an animation source and you want frames packed into a texture.
+Love2D OGV modes:
 
-- Export atlas as PNG
-- Layout modes:
-  - `grid`
-  - `horizontal`
-  - `vertical`
-- Resolution presets:
-  - `Low`
-  - `Medium`
-  - `High`
-- Backends:
-  - `ffmpeg`
-  - `opencv`
+- `Love2D Compatibility`
+- `Seek Friendly`
+- `Ideal Loop`
+- `Lightweight`
 
-This workflow is especially useful for 2D engines, prototyping, UI animation sources, and effects pipelines.
+### Atlas Generation
 
-## Why Use This Instead of Raw FFmpeg
-
-FFmpeg already does the heavy lifting. This app is useful because it reduces repeated setup work:
-
-- Presets instead of remembering long command lines
-- Safer defaults for common Godot OGV cases
-- Batch conversion from a GUI
-- Video analysis before export
-- Atlas generation in the same tool
-- Lightweight recommendations for format and playback decisions
+- Export PNG atlases from video clips
+- Layout modes: `grid`, `horizontal`, `vertical`
+- Backends: `ffmpeg`, `opencv`
 
 ## Requirements
 
-- Python 3.11+
-- FFmpeg and FFprobe
+- Python `3.11+`
+- `ffmpeg`
+- `ffprobe`
 
-In this project, `bin/` is mainly used for Windows builds.
+On Windows, the app can use:
+
+- `bin/ffmpeg.exe` and `bin/ffprobe.exe`
+- `GVC_FFMPEG_DIR`
+- `ffmpeg` and `ffprobe` from `PATH`
+
+On Linux, `ffmpeg` and `ffprobe` should be available in `PATH`.
+
+## Development Environment
+
+### Windows
+
+1. Install Python `3.11+`.
+2. Clone or download this repository.
+3. Create a virtual environment:
+
+```powershell
+python -m venv .venv
+```
+
+4. Activate it:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+5. Install Python dependencies:
+
+```powershell
+pip install -r requirements.txt
+pip install -e .
+```
+
+6. Make sure FFmpeg (7.1.1 recomended version) is available using ONE of these options:
+
+- Copy `ffmpeg.exe` and `ffprobe.exe` into `bin/`
+- Set `GVC_FFMPEG_DIR` to the folder that contains both binaries
+- Add FFmpeg to `PATH`
+
+7. Run the app:
+
+```powershell
+gvc-gui
+```
 
 ### Linux
 
-- Install `ffmpeg` with your distro package manager
-- Make sure `ffmpeg` and `ffprobe` are available in `PATH`
+1. Install Python `3.11+`.
+2. Install FFmpeg with your package manager.
+3. Clone or download this repository.
+4. Create a virtual environment:
 
-Verify:
+```bash
+python3 -m venv .venv
+```
+
+5. Activate it:
+
+```bash
+source .venv/bin/activate
+```
+
+6. Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+7. Verify FFmpeg:
 
 ```bash
 ffmpeg -version
 ffprobe -version
 ```
 
-### Windows
+8. Run the app:
 
-Use one of these options:
+```bash
+gvc-gui
+```
 
-- `bin/ffmpeg.exe` and `bin/ffprobe.exe`
-- `GVC_FFMPEG_DIR=/path/to/binaries`
-- FFmpeg binaries available in `PATH`
-
-## Installation (Linux)
-
-Install dependencies for your distro:
+### Linux Package Examples
 
 ```bash
 # Arch / CachyOS
@@ -119,17 +147,9 @@ sudo dnf install ffmpeg python3 python3-pip
 sudo zypper install ffmpeg python3 python3-pip
 ```
 
-Then install the project:
+## Running the GUI
 
-```bash
-cd python_converter
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
-```
-
-## Run the GUI
+With the virtual environment active on Windows or Linux:
 
 ```bash
 gvc-gui
@@ -139,9 +159,7 @@ gvc-gui
 
 ### Linux
 
-1. Install FFmpeg on the system.
-2. Verify `ffmpeg` and `ffprobe` are available.
-3. Run:
+Make sure `ffmpeg` and `ffprobe` are available in `PATH`, then run:
 
 ```bash
 bash scripts/build_linux.sh
@@ -149,15 +167,9 @@ bash scripts/build_linux.sh
 
 Output is generated in `dist/gvc/`.
 
-Linux distribution notes:
-
-- Ship the full `dist/gvc/` directory
-- End users still need `ffmpeg` and `ffprobe` available in `PATH`
-
 ### Windows
 
-1. Copy binaries to `bin/ffmpeg.exe` and `bin/ffprobe.exe`
-2. Run:
+Copy `ffmpeg.exe` and `ffprobe.exe` into `bin/`, then run:
 
 ```powershell
 ./scripts/build_windows.ps1
@@ -165,18 +177,13 @@ Linux distribution notes:
 
 Output is generated in `dist/gvc/`.
 
-Windows distribution notes:
-
-- Ship the full `dist/gvc/` directory
-- FFmpeg binaries are bundled only if they were present in `bin/` during the build
-
 ## Project Structure
 
 - `src/gvc/gui.py`: PySide6 desktop interface
-- `src/gvc/convert.py`: conversion presets and FFmpeg argument building
-- `src/gvc/atlas.py`: atlas generation with FFmpeg or OpenCV
-- `src/gvc/probe.py`: metadata probing through FFprobe
-- `src/gvc/recommendations.py`: Godot-oriented playback recommendations
-- `src/gvc/ffmpeg_paths.py`: FFmpeg and FFprobe path resolution
+- `src/gvc/convert.py`: video conversion presets and FFmpeg arguments
+- `src/gvc/atlas.py`: atlas generation
+- `src/gvc/probe.py`: FFprobe metadata reading
+- `src/gvc/recommendations.py`: playback recommendations
+- `src/gvc/ffmpeg_paths.py`: FFmpeg path resolution
 - `src/gvc/settings.py`: persisted UI settings
-- `src/gvc/i18n.py`: UI text and localization helpers
+- `src/gvc/i18n.py`: localization
