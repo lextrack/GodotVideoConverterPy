@@ -2,7 +2,7 @@
 
 Desktop app for converting videos into game-ready formats, especially `ogv` for Godot, plus sprite atlas generation for 2D workflows.
 
-This project is a Python rewrite of the original [.NET tool](https://github.com/lextrack/GodotVideoConverter).
+This project is a Python rewrite of the original .NET tool I made some time ago.
 
 ## Features
 
